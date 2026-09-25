@@ -1,65 +1,96 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import '@/global.css';
-
-import { Platform } from 'react-native';
-
-export const Colors = {
+export const ThemeColors = {
   light: {
-    text: '#000000',
-    background: '#ffffff',
-    backgroundElement: '#F0F0F3',
-    backgroundSelected: '#E0E1E6',
-    textSecondary: '#60646C',
+    bg: '#e7eeed',
+    surface: '#f9fbfa',
+    surface2: '#dbe6e5',
+    ink: '#0c2830',
+    muted: '#557077',
+    line: '#c9d8d7',
+    accent: '#2a4494',
+    onAccent: '#ffffff',
+    accentSoft: '#dfe5f7',
+    red: '#d8412b',
+    redSoft: '#f9e1dc',
+    gold: '#8f6a0e',
+    goldSoft: '#f5e9c8',
+    ok: '#237a52',
+    okSoft: '#d9efe4',
+    bad: '#b8332a',
+    badSoft: '#f8dcd8',
   },
   dark: {
-    text: '#ffffff',
-    background: '#000000',
-    backgroundElement: '#212225',
-    backgroundSelected: '#2E3135',
-    textSecondary: '#B0B4BA',
+    bg: '#06181f',
+    surface: '#0d2530',
+    surface2: '#143441',
+    ink: '#e4eff0',
+    muted: '#8aa7ae',
+    line: '#1d4150',
+    accent: '#93aaff',
+    onAccent: '#08132f',
+    accentSoft: '#182a5a',
+    red: '#ff7b62',
+    redSoft: '#3d1f1b',
+    gold: '#e6bb55',
+    goldSoft: '#3a2f12',
+    ok: '#5fd097',
+    okSoft: '#123a29',
+    bad: '#ff8579',
+    badSoft: '#40201d',
   },
 } as const;
 
-export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
+export interface ThemeType {
+  bg: string;
+  surface: string;
+  surface2: string;
+  ink: string;
+  muted: string;
+  line: string;
+  accent: string;
+  onAccent: string;
+  accentSoft: string;
+  red: string;
+  redSoft: string;
+  gold: string;
+  goldSoft: string;
+  ok: string;
+  okSoft: string;
+  bad: string;
+  badSoft: string;
+}
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
-  },
-});
+export const FontNames = {
+  sansRegular: 'PlusJakartaSans_400Regular',
+  sansMedium: 'PlusJakartaSans_500Medium',
+  sansSemiBold: 'PlusJakartaSans_600SemiBold',
+  sansBold: 'PlusJakartaSans_700Bold',
+  serifMedium: 'ShipporiMinchoB1_500Medium',
+  serifBold: 'ShipporiMinchoB1_700Bold',
+  serifExtraBold: 'ShipporiMinchoB1_800ExtraBold',
+};
 
-export const Spacing = {
-  half: 2,
-  one: 4,
-  two: 8,
-  three: 16,
-  four: 24,
-  five: 32,
-  six: 64,
-} as const;
+export const GRADES = ['Champion', 'Premium', 'A', 'B', 'C'] as const;
+export const SEX = ['Belum diketahui', 'Jantan', 'Betina'] as const;
+export const COND = ['Sehat', 'Karantina', 'Pemulihan', 'Sakit'] as const;
+export const PAY = ['Tunai', 'Transfer', 'QRIS', 'Lainnya'] as const;
+export const VARS = [
+  'Kohaku',
+  'Sanke',
+  'Showa',
+  'Shiro Utsuri',
+  'Asagi',
+  'Shusui',
+  'Tancho',
+  'Bekko',
+  'Ogon',
+  'Yamabuki',
+  'Goshiki',
+  'Kujaku',
+  'Chagoi',
+  'Doitsu',
+  'Kikusui',
+  'Benigoi',
+] as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
-export const MaxContentWidth = 800;
+export const LOW = 2;
+export const STORAGE_KEY = 'djekkoi.v1';
