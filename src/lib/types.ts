@@ -49,6 +49,8 @@ export interface HistoryEntry {
 }
 
 export interface AppState {
+  userId?: string;
+  updatedAt?: string;
   ponds: Pond[];
   fish: Fish[];
   history: HistoryEntry[];

@@ -9,7 +9,7 @@ import { useAuth } from '@/context/AuthContext';
 
 export const SettingsSheet: React.FC = () => {
   const theme = useTheme();
-  const { openSheet, closeSheet, wipeData } = useStore();
+  const { openSheet, closeSheet, wipeData, clearStore } = useStore();
   const { profile, user, logout } = useAuth();
 
   const handleLogoutPress = () => {
@@ -19,6 +19,7 @@ export const SettingsSheet: React.FC = () => {
       confirmLabel: 'Ya, Keluar',
       onConfirm: async () => {
         closeSheet();
+        clearStore();
         await logout();
       },
     });

@@ -1,15 +1,16 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import { auth, db } from '@/lib/firebase';
+import { AppState, UserProfile } from '@/lib/types';
 import {
   User,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  sendEmailVerification,
+  signInWithEmailAndPassword,
   signOut,
   updateProfile,
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { auth, db } from '@/lib/firebase';
-import { UserProfile, AppState } from '@/lib/types';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 
 interface AuthContextType {
   user: User | null;
@@ -18,6 +19,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, pass: string) => Promise<void>;
   register: (name: string, email: string, pass: string) => Promise<void>;
+  resendVerificationEmail: (email: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -26,6 +28,8 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const getAuthErrorMessage = (error: any): string => {
   const code = error?.code || '';
   switch (code) {
+    case 'auth/email-not-verified':
+      return 'Email Anda belum diverifikasi. Silakan cek kotak masuk email Anda.';
     case 'auth/email-already-in-use':
       return 'Email ini sudah terdaftar. Silakan masuk atau gunakan email lain.';
     case 'auth/invalid-email':
@@ -39,7 +43,7 @@ export const getAuthErrorMessage = (error: any): string => {
     case 'auth/invalid-credential':
       return 'Email atau kata sandi salah.';
     case 'auth/too-many-requests':
-      return 'Terlalu banyak percobaan login gagal. Coba lagi dalam beberapa saat.';
+      return 'Terlalu banyak permintaan. Silakan tunggu beberapa saat sebelum mencoba lagi.';
     case 'auth/network-request-failed':
       return 'Gagal terhubung ke server. Periksa koneksi internet Anda.';
     case 'auth/configuration-not-found':
@@ -57,8 +61,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
+      // Hanya izinkan pengguna yang telah memverifikasi email
+      if (currentUser && currentUser.emailVerified) {
+        setUser(currentUser);
         try {
           const userDocRef = doc(db, 'users', currentUser.uid);
           const userDoc = await getDoc(userDocRef);
@@ -78,6 +83,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           console.error('Error fetching user profile from Firestore:', err);
         }
       } else {
+        setUser(null);
         setProfile(null);
       }
       setIsLoading(false);
@@ -87,7 +93,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const login = async (email: string, pass: string): Promise<void> => {
-    const credential = await signInWithEmailAndPassword(auth, email.trim(), pass);
+    const trimmedEmail = email.trim();
+    const credential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+
+    // Validasi email verification
+    if (!credential.user.emailVerified) {
+      await signOut(auth);
+      setUser(null);
+      setProfile(null);
+
+      const error: any = new Error('Email Anda belum diverifikasi. Silakan cek kotak masuk email Anda.');
+      error.code = 'auth/email-not-verified';
+      throw error;
+    }
+
     const userDocRef = doc(db, 'users', credential.user.uid);
     const userDoc = await getDoc(userDocRef);
     if (userDoc.exists()) {
@@ -102,6 +121,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setProfile(fallbackProfile);
       await setDoc(userDocRef, fallbackProfile, { merge: true });
     }
+    setUser(credential.user);
   };
 
   const register = async (name: string, email: string, pass: string): Promise<void> => {
@@ -118,50 +138,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date().toISOString(),
     };
 
-    setProfile(newProfile);
-
     // Simpan profil user baru di database Firestore
     await setDoc(doc(db, 'users', credential.user.uid), newProfile);
 
-    // Inisialisasi struktur penyimpanan data ikan terisolasi untuk akun ini
+    // Inisialisasi struktur farm terisolasi
     const initialUserStore: AppState = {
+      userId: credential.user.uid,
+      updatedAt: new Date().toISOString(),
       ponds: [
-        { id: 'pond-1', userId: credential.user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
-        { id: 'pond-2', userId: credential.user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
+        { id: `pond-1-${credential.user.uid.slice(0, 6)}`, userId: credential.user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
+        { id: `pond-2-${credential.user.uid.slice(0, 6)}`, userId: credential.user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
       ],
       fish: [],
       history: [],
-      varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
+      varietyHistory: [],
     };
 
-    // Jika sebelumnya ada data ikan di app_data/main_store sebelum sistem login dibuat,
-    // salin data tersebut agar tidak hilang
-    try {
-      const legacySnap = await getDoc(doc(db, 'app_data', 'main_store'));
-      if (legacySnap.exists()) {
-        const legacyData = legacySnap.data();
-        if (Array.isArray(legacyData.fish) && legacyData.fish.length > 0) {
-          initialUserStore.fish = legacyData.fish.map((f: any) => ({ ...f, userId: credential.user.uid }));
-        }
-        if (Array.isArray(legacyData.ponds) && legacyData.ponds.length > 0) {
-          initialUserStore.ponds = legacyData.ponds.map((p: any) => ({ ...p, userId: credential.user.uid }));
-        }
-        if (Array.isArray(legacyData.history) && legacyData.history.length > 0) {
-          initialUserStore.history = legacyData.history.map((h: any) => ({ ...h, userId: credential.user.uid }));
-        }
-        if (Array.isArray(legacyData.varietyHistory) && legacyData.varietyHistory.length > 0) {
-          initialUserStore.varietyHistory = legacyData.varietyHistory;
-        }
-      }
-    } catch {
-      // Tidak masalah jika tidak ada dokumen legacy atau permission terbatas
-    }
-
     await setDoc(doc(db, 'user_stores', credential.user.uid), initialUserStore);
+
+    // Kirim email verifikasi Firebase Auth
+    await sendEmailVerification(credential.user);
+
+    // Keluarkan sesi sementara agar user harus verifikasi terlebih dahulu sebelum login
+    await signOut(auth);
+    setUser(null);
+    setProfile(null);
+  };
+
+  const resendVerificationEmail = async (email: string, pass: string): Promise<void> => {
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail) throw new Error('Email tidak boleh kosong.');
+    if (!pass) throw new Error('Kata sandi diperlukan untuk mengirim ulang email verifikasi.');
+
+    const credential = await signInWithEmailAndPassword(auth, trimmedEmail, pass);
+    await sendEmailVerification(credential.user);
+    await signOut(auth);
+    setUser(null);
+    setProfile(null);
   };
 
   const logout = async (): Promise<void> => {
     await signOut(auth);
+    setUser(null);
     setProfile(null);
   };
 
@@ -171,9 +189,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         profile,
         isLoading,
-        isAuthenticated: !!user,
+        isAuthenticated: !!user && !!user.emailVerified,
         login,
         register,
+        resendVerificationEmail,
         logout,
       }}
     >

@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppState, Fish, HistoryEntry, Pond, SaleInfo } from '@/lib/types';
 import { fLabel, uid } from '@/lib/format';
@@ -50,6 +50,9 @@ interface StoreContextType {
   openSheet: (type: SheetType, data?: any) => void;
   closeSheet: () => void;
 
+  // Clear / Reset State on Logout
+  clearStore: () => void;
+
   // Data Actions
   addFish: (fishData: Omit<Fish, 'id' | 'tgl'>) => void;
   editFish: (id: string, updates: Partial<Fish>, logEntries: { judul: string; detail: string }[]) => void;
@@ -99,6 +102,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setToastMessage(msg);
   }, []);
 
+  const clearStore = useCallback(() => {
+    setState(initialAppState);
+    setIsLoaded(false);
+    setSearchQuery('');
+    setPondFilter('all');
+    setActivePondDetailId(null);
+    setHistoryFilter('all');
+    setPeriodFilter(30);
+    setActiveSheet(null);
+    setToastMessage(null);
+  }, []);
+
   useEffect(() => {
     if (toastMessage) {
       const timer = setTimeout(() => {
@@ -108,15 +123,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [toastMessage]);
 
-  // Listen to Cloud Firestore in real-time, isolated per user UID
+  // Listen to Cloud Firestore in real-time, strictly isolated per user UID
   useEffect(() => {
     if (!user) {
-      setState(initialAppState);
+      clearStore();
       setIsLoaded(true);
       return;
     }
 
     setIsLoaded(false);
+    setSearchQuery('');
+    setPondFilter('all');
+    setActivePondDetailId(null);
+    setHistoryFilter('all');
+    setPeriodFilter(30);
+    setActiveSheet(null);
+
     const docRef = doc(db, 'user_stores', user.uid);
     const unsubscribe = onSnapshot(
       docRef,
@@ -129,49 +151,41 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             Array.isArray(data.fish) &&
             Array.isArray(data.history)
           ) {
+            // Isolasi data: pastikan hanya data yang terikat ke UID user ini yang dimuat
+            const userPonds: Pond[] = data.ponds
+              .filter((p: Pond) => !p.userId || p.userId === user.uid)
+              .map((p: Pond) => ({ ...p, userId: user.uid }));
+            const userFish: Fish[] = data.fish
+              .filter((f: Fish) => !f.userId || f.userId === user.uid)
+              .map((f: Fish) => ({ ...f, userId: user.uid }));
+            const userHistory: HistoryEntry[] = data.history
+              .filter((h: HistoryEntry) => !h.userId || h.userId === user.uid)
+              .map((h: HistoryEntry) => ({ ...h, userId: user.uid }));
+
             setState({
-              ponds: data.ponds,
-              fish: data.fish,
-              history: data.history,
+              userId: user.uid,
+              updatedAt: data.updatedAt || new Date().toISOString(),
+              ponds: userPonds,
+              fish: userFish,
+              history: userHistory,
               varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
             });
           }
         } else {
-          // Initialize starter isolated farm data if not yet created in Firestore
+          // Inisialisasi farm baru yang bersih dan terisolasi khusus untuk akun ini
           const defaultInitialState: AppState = {
+            userId: user.uid,
+            updatedAt: new Date().toISOString(),
             ponds: [
-              { id: 'pond-1', userId: user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
-              { id: 'pond-2', userId: user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
+              { id: `pond-1-${user.uid.slice(0, 6)}`, userId: user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
+              { id: `pond-2-${user.uid.slice(0, 6)}`, userId: user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
             ],
             fish: [],
             history: [],
             varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
           };
-
-          (async () => {
-            try {
-              const legacyDoc = await getDoc(doc(db, 'app_data', 'main_store'));
-              if (legacyDoc.exists()) {
-                const legacy = legacyDoc.data();
-                if (Array.isArray(legacy.fish) && legacy.fish.length > 0) {
-                  defaultInitialState.fish = legacy.fish.map((f: any) => ({ ...f, userId: user.uid }));
-                }
-                if (Array.isArray(legacy.ponds) && legacy.ponds.length > 0) {
-                  defaultInitialState.ponds = legacy.ponds.map((p: any) => ({ ...p, userId: user.uid }));
-                }
-                if (Array.isArray(legacy.history) && legacy.history.length > 0) {
-                  defaultInitialState.history = legacy.history.map((h: any) => ({ ...h, userId: user.uid }));
-                }
-                if (Array.isArray(legacy.varietyHistory) && legacy.varietyHistory.length > 0) {
-                  defaultInitialState.varietyHistory = legacy.varietyHistory;
-                }
-              }
-            } catch {
-              // Legacy fetch failed or not found, proceed with default starter
-            }
-            await setDoc(docRef, defaultInitialState).catch(console.error);
-            setState(defaultInitialState);
-          })();
+          setDoc(docRef, defaultInitialState).catch(console.error);
+          setState(defaultInitialState);
         }
         setIsLoaded(true);
       },
@@ -182,15 +196,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     );
 
     return () => unsubscribe();
-  }, [user]);
+  }, [user, clearStore]);
 
-  // Save to Cloud Firestore, bound to user UID
+  // Save to Cloud Firestore, bound strictly to user UID
   const saveState = useCallback(async (newState: AppState) => {
-    setState(newState);
     if (!user) return;
+    const stateWithUser: AppState = {
+      ...newState,
+      userId: user.uid,
+      updatedAt: new Date().toISOString(),
+    };
+    setState(stateWithUser);
     try {
       const docRef = doc(db, 'user_stores', user.uid);
-      await setDoc(docRef, newState);
+      await setDoc(docRef, stateWithUser);
     } catch (e) {
       console.error('Failed to save data to Firestore:', e);
       showToast('Gagal menyimpan data ke Firestore.');
@@ -213,19 +232,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state.ponds]
   );
 
-  // Data Actions
+  // Data Actions (Semua menyertakan userId pengguna yang login)
   const addFish = useCallback(
     (fishData: Omit<Fish, 'id' | 'tgl'>) => {
+      if (!user) return;
       const newFish: Fish = {
         ...fishData,
         id: uid(),
-        userId: user?.uid,
+        userId: user.uid,
         tgl: new Date().toISOString(),
       };
       const pondName = state.ponds.find((p) => p.id === newFish.kolamId)?.name || '-';
       const historyItem: HistoryEntry = {
         id: uid(),
-        userId: user?.uid,
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'masuk',
         judul: 'Ikan masuk',
@@ -247,6 +267,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: [newFish, ...state.fish],
         history: [historyItem, ...state.history],
         varietyHistory: newVarietyHistory,
@@ -259,15 +280,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state, user, saveState, closeSheet, showToast]
   );
 
-
   const editFish = useCallback(
     (id: string, updates: Partial<Fish>, logEntries: { judul: string; detail: string }[]) => {
+      if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
-      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, ...updates } : f));
+      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, ...updates, userId: user.uid } : f));
       const newLogs: HistoryEntry[] = logEntries.map((log) => ({
         id: uid(),
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'edit_ikan',
         judul: log.judul,
@@ -277,6 +299,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: updatedFishList,
         history: [...newLogs, ...state.history],
       };
@@ -285,11 +308,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Perubahan disimpan');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const sellFish = useCallback(
     (id: string, count: number, saleInfo: SaleInfo) => {
+      if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
@@ -300,12 +324,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         updatedFishList = state.fish.filter((f) => f.id !== id);
       } else {
         updatedFishList = state.fish.map((f) =>
-          f.id === id ? { ...f, jumlah: f.jumlah - count } : f
+          f.id === id ? { ...f, jumlah: f.jumlah - count, userId: user.uid } : f
         );
       }
 
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'keluar',
         judul: 'Ikan keluar',
@@ -318,6 +343,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: updatedFishList,
         history: [historyItem, ...state.history],
       };
@@ -326,11 +352,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Penjualan dicatat');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const moveFish = useCallback(
     (id: string, targetPondId: string, count: number) => {
+      if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
@@ -339,23 +366,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       let updatedFishList: Fish[];
       if (count === fishItem.jumlah) {
-        updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, kolamId: targetPondId } : f));
+        updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, kolamId: targetPondId, userId: user.uid } : f));
       } else {
         const remainingCount = fishItem.jumlah - count;
         const clonedFish: Fish = {
           ...fishItem,
           id: uid(),
+          userId: user.uid,
           jumlah: count,
           kolamId: targetPondId,
         };
         updatedFishList = state.fish.map((f) =>
-          f.id === id ? { ...f, jumlah: remainingCount } : f
+          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f
         );
         updatedFishList.push(clonedFish);
       }
 
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'keluar',
         judul: 'Ikan keluar',
@@ -368,6 +397,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: updatedFishList,
         history: [historyItem, ...state.history],
       };
@@ -376,11 +406,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Ikan dipindahkan');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const deleteFish = useCallback(
     (id: string) => {
+      if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
@@ -389,6 +420,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'edit_ikan',
         judul: 'Hapus data ikan',
@@ -399,6 +431,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: updatedFishList,
         history: [historyItem, ...state.history],
       };
@@ -407,19 +440,21 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Data ikan dihapus');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const toggleDisplay = useCallback(
     (id: string) => {
+      if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
       const newDisplay = !fishItem.display;
-      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, display: newDisplay } : f));
+      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, display: newDisplay, userId: user.uid } : f));
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         fish: updatedFishList,
       };
 
@@ -427,21 +462,22 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast(newDisplay ? 'Ditampilkan di penjualan' : 'Disembunyikan dari penjualan');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const addPond = useCallback(
     (name: string, lokasi: string) => {
+      if (!user) return;
       const newPond: Pond = {
         id: uid(),
-        userId: user?.uid,
+        userId: user.uid,
         name,
         lokasi,
       };
 
       const historyItem: HistoryEntry = {
         id: uid(),
-        userId: user?.uid,
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'edit_kolam',
         judul: 'Tambah kolam',
@@ -451,6 +487,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         ponds: [...state.ponds, newPond],
         history: [historyItem, ...state.history],
       };
@@ -464,15 +501,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const editPond = useCallback(
     (id: string, name: string, lokasi: string) => {
+      if (!user) return;
       const pondItem = state.ponds.find((p) => p.id === id);
       if (!pondItem) return;
 
-      const updatedPonds = state.ponds.map((p) => (p.id === id ? { ...p, name, lokasi } : p));
+      const updatedPonds = state.ponds.map((p) => (p.id === id ? { ...p, name, lokasi, userId: user.uid } : p));
       const logs: HistoryEntry[] = [];
 
       if (name !== pondItem.name) {
         logs.push({
           id: uid(),
+          userId: user.uid,
           ts: new Date().toISOString(),
           tipe: 'edit_kolam',
           judul: 'Ubah nama kolam',
@@ -484,6 +523,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (lokasi !== pondItem.lokasi) {
         logs.push({
           id: uid(),
+          userId: user.uid,
           ts: new Date().toISOString(),
           tipe: 'edit_kolam',
           judul: 'Ubah lokasi kolam',
@@ -494,6 +534,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         ponds: updatedPonds,
         history: [...logs, ...state.history],
       };
@@ -502,17 +543,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Kolam diperbarui');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const deletePond = useCallback(
     (id: string) => {
+      if (!user) return;
       const pondItem = state.ponds.find((p) => p.id === id);
       if (!pondItem) return;
 
       const updatedPonds = state.ponds.filter((p) => p.id !== id);
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user.uid,
         ts: new Date().toISOString(),
         tipe: 'edit_kolam',
         judul: 'Hapus kolam',
@@ -525,6 +568,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         ponds: updatedPonds,
         history: [historyItem, ...state.history],
       };
@@ -533,28 +577,33 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Kolam dihapus');
     },
-    [state, pondFilter, activePondDetailId, saveState, closeSheet, showToast]
+    [state, user, pondFilter, activePondDetailId, saveState, closeSheet, showToast]
   );
 
   const deleteVarietyHistory = useCallback(
     (name: string) => {
+      if (!user) return;
       const trimmed = name.trim().toLowerCase();
       const updatedHistory = (state.varietyHistory || []).filter(
         (v) => v.trim().toLowerCase() !== trimmed
       );
       const newState: AppState = {
         ...state,
+        userId: user.uid,
         varietyHistory: updatedHistory,
       };
       saveState(newState);
       closeSheet();
       showToast('Rekomendasi dihapus');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const wipeData = useCallback(() => {
+    if (!user) return;
     const emptyState: AppState = {
+      userId: user.uid,
+      updatedAt: new Date().toISOString(),
       ponds: [],
       fish: [],
       history: [],
@@ -565,7 +614,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     saveState(emptyState);
     closeSheet();
     showToast('Semua data dihapus');
-  }, [saveState, closeSheet, showToast]);
+  }, [user, saveState, closeSheet, showToast]);
 
   return (
     <StoreContext.Provider
@@ -587,6 +636,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         activeSheet,
         openSheet,
         closeSheet,
+        clearStore,
         addFish,
         editFish,
         sellFish,
