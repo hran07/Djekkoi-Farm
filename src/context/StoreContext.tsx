@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppState, Fish, HistoryEntry, Pond, SaleInfo } from '@/lib/types';
 import { fLabel, uid } from '@/lib/format';
@@ -147,8 +147,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             history: [],
             varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
           };
-          setDoc(docRef, defaultInitialState).catch(console.error);
-          setState(defaultInitialState);
+
+          (async () => {
+            try {
+              const legacyDoc = await getDoc(doc(db, 'app_data', 'main_store'));
+              if (legacyDoc.exists()) {
+                const legacy = legacyDoc.data();
+                if (Array.isArray(legacy.fish) && legacy.fish.length > 0) {
+                  defaultInitialState.fish = legacy.fish.map((f: any) => ({ ...f, userId: user.uid }));
+                }
+                if (Array.isArray(legacy.ponds) && legacy.ponds.length > 0) {
+                  defaultInitialState.ponds = legacy.ponds.map((p: any) => ({ ...p, userId: user.uid }));
+                }
+                if (Array.isArray(legacy.history) && legacy.history.length > 0) {
+                  defaultInitialState.history = legacy.history.map((h: any) => ({ ...h, userId: user.uid }));
+                }
+                if (Array.isArray(legacy.varietyHistory) && legacy.varietyHistory.length > 0) {
+                  defaultInitialState.varietyHistory = legacy.varietyHistory;
+                }
+              }
+            } catch {
+              // Legacy fetch failed or not found, proceed with default starter
+            }
+            await setDoc(docRef, defaultInitialState).catch(console.error);
+            setState(defaultInitialState);
+          })();
         }
         setIsLoaded(true);
       },

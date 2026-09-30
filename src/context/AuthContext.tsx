@@ -71,8 +71,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               email: currentUser.email || '',
               createdAt: new Date().toISOString(),
             };
-            setProfile(fallbackProfile);
-            await setDoc(userDocRef, fallbackProfile);
+            setProfile((prev) => (prev?.uid === currentUser.uid ? prev : fallbackProfile));
+            await setDoc(userDocRef, fallbackProfile, { merge: true });
           }
         } catch (err) {
           console.error('Error fetching user profile from Firestore:', err);
@@ -100,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createdAt: new Date().toISOString(),
       };
       setProfile(fallbackProfile);
-      await setDoc(userDocRef, fallbackProfile);
+      await setDoc(userDocRef, fallbackProfile, { merge: true });
     }
   };
 
@@ -118,6 +118,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       createdAt: new Date().toISOString(),
     };
 
+    setProfile(newProfile);
+
     // Simpan profil user baru di database Firestore
     await setDoc(doc(db, 'users', credential.user.uid), newProfile);
 
@@ -132,8 +134,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
     };
 
+    // Jika sebelumnya ada data ikan di app_data/main_store sebelum sistem login dibuat,
+    // salin data tersebut agar tidak hilang
+    try {
+      const legacySnap = await getDoc(doc(db, 'app_data', 'main_store'));
+      if (legacySnap.exists()) {
+        const legacyData = legacySnap.data();
+        if (Array.isArray(legacyData.fish) && legacyData.fish.length > 0) {
+          initialUserStore.fish = legacyData.fish.map((f: any) => ({ ...f, userId: credential.user.uid }));
+        }
+        if (Array.isArray(legacyData.ponds) && legacyData.ponds.length > 0) {
+          initialUserStore.ponds = legacyData.ponds.map((p: any) => ({ ...p, userId: credential.user.uid }));
+        }
+        if (Array.isArray(legacyData.history) && legacyData.history.length > 0) {
+          initialUserStore.history = legacyData.history.map((h: any) => ({ ...h, userId: credential.user.uid }));
+        }
+        if (Array.isArray(legacyData.varietyHistory) && legacyData.varietyHistory.length > 0) {
+          initialUserStore.varietyHistory = legacyData.varietyHistory;
+        }
+      }
+    } catch {
+      // Tidak masalah jika tidak ada dokumen legacy atau permission terbatas
+    }
+
     await setDoc(doc(db, 'user_stores', credential.user.uid), initialUserStore);
-    setProfile(newProfile);
   };
 
   const logout = async (): Promise<void> => {
