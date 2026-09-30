@@ -13,11 +13,10 @@ interface TabItemConfig {
 }
 
 const TAB_CONFIGS: TabItemConfig[] = [
+  { name: 'marketplace', label: 'Marketplace', iconName: 'marketplace' },
   { name: 'index', label: 'Dashboard', iconName: 'dashboard' },
-  { name: 'ikan', label: 'Ikan', iconName: 'ikan' },
-  { name: 'kolam', label: 'Kolam', iconName: 'kolam' },
-  { name: 'penjualan', label: 'Penjualan', iconName: 'penjualan' },
-  { name: 'riwayat', label: 'Riwayat', iconName: 'riwayat' },
+  { name: 'stock', label: 'Stock', iconName: 'kelola' },
+  { name: 'account', label: 'Akun', iconName: 'account' },
 ];
 
 export const CustomTabBar: React.FC<any> = ({ state, navigation }) => {

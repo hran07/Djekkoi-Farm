@@ -17,6 +17,7 @@ import {
 
 import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { StoreProvider } from '@/context/StoreContext';
+import { ThemeProvider } from '@/context/ThemeContext';
 import { useTheme } from '@/hooks/useTheme';
 
 SplashScreen.preventAutoHideAsync();
@@ -33,11 +34,11 @@ function RootNavigator() {
     const inAuthScreen = segments[0] === 'login' || segments[0] === 'register';
 
     if (!user && !inAuthScreen) {
-      // User belum login dan berada di luar halaman auth -> arahkan ke login
+      // User belum login / sudah logout → arahkan ke login
       router.replace('/login');
     } else if (user && inAuthScreen) {
-      // User sudah login dan masih di halaman login/register -> langsung arahkan ke kelola ikan (/ikan)
-      router.replace('/ikan');
+      // User sudah login → arahkan ke tab pertama (marketplace)
+      router.replace('/(tabs)/marketplace');
     }
   }, [user, isLoading, segments, router]);
 
@@ -80,10 +81,13 @@ export default function RootLayout() {
   }
 
   return (
-    <AuthProvider>
-      <StoreProvider>
-        <RootNavigator />
-      </StoreProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <StoreProvider>
+          <RootNavigator />
+        </StoreProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }
+

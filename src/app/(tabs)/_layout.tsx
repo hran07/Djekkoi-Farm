@@ -20,11 +20,16 @@ export default function TabsLayout() {
           sceneStyle: { backgroundColor: theme.bg },
         }}
       >
+        <Tabs.Screen name="marketplace" options={{ title: 'Marketplace' }} />
         <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
-        <Tabs.Screen name="ikan" options={{ title: 'Ikan' }} />
-        <Tabs.Screen name="kolam" options={{ title: 'Kolam' }} />
-        <Tabs.Screen name="penjualan" options={{ title: 'Penjualan' }} />
-        <Tabs.Screen name="riwayat" options={{ title: 'Riwayat' }} />
+        <Tabs.Screen name="stock" options={{ title: 'Stock' }} />
+        <Tabs.Screen name="account" options={{ title: 'Akun' }} />
+        {/* Tab lama — tersembunyi dari bottom bar */}
+        <Tabs.Screen name="kelola" options={{ href: null }} />
+        <Tabs.Screen name="penjualan" options={{ href: null }} />
+        <Tabs.Screen name="ikan" options={{ href: null }} />
+        <Tabs.Screen name="kolam" options={{ href: null }} />
+        <Tabs.Screen name="riwayat" options={{ href: null }} />
       </Tabs>
       <GlobalSheetHost />
       <Toast />
