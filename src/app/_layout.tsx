@@ -1,6 +1,6 @@
 import React, { useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Tabs } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
+import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import {
   useFonts,
@@ -15,37 +15,46 @@ import {
   ShipporiMinchoB1_800ExtraBold,
 } from '@expo-google-fonts/shippori-mincho-b1';
 
+import { AuthProvider, useAuth } from '@/context/AuthContext';
 import { StoreProvider } from '@/context/StoreContext';
-import { AppHeader } from '@/components/AppHeader';
-import { CustomTabBar } from '@/components/CustomTabBar';
-import { GlobalSheetHost } from '@/components/sheets/GlobalSheetHost';
-import { Toast } from '@/components/Toast';
 import { useTheme } from '@/hooks/useTheme';
 
 SplashScreen.preventAutoHideAsync();
 
-function RootTabsLayout() {
+function RootNavigator() {
+  const { user, isLoading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
   const theme = useTheme();
 
+  useEffect(() => {
+    if (isLoading) return;
+
+    const inAuthScreen = segments[0] === 'login' || segments[0] === 'register';
+
+    if (!user && !inAuthScreen) {
+      // User belum login dan berada di luar halaman auth -> arahkan ke login
+      router.replace('/login');
+    } else if (user && inAuthScreen) {
+      // User sudah login dan masih di halaman login/register -> langsung arahkan ke kelola ikan (/ikan)
+      router.replace('/ikan');
+    }
+  }, [user, isLoading, segments, router]);
+
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.bg }}>
+        <ActivityIndicator size="large" color={theme.accent} />
+      </View>
+    );
+  }
+
   return (
-    <View style={[styles.flexOne, { backgroundColor: theme.bg }]}>
-      <AppHeader />
-      <Tabs
-        tabBar={(props) => <CustomTabBar {...props} />}
-        screenOptions={{
-          headerShown: false,
-          sceneStyle: { backgroundColor: theme.bg },
-        }}
-      >
-        <Tabs.Screen name="index" options={{ title: 'Dashboard' }} />
-        <Tabs.Screen name="ikan" options={{ title: 'Ikan' }} />
-        <Tabs.Screen name="kolam" options={{ title: 'Kolam' }} />
-        <Tabs.Screen name="penjualan" options={{ title: 'Penjualan' }} />
-        <Tabs.Screen name="riwayat" options={{ title: 'Riwayat' }} />
-      </Tabs>
-      <GlobalSheetHost />
-      <Toast />
-    </View>
+    <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <Stack.Screen name="login" options={{ headerShown: false }} />
+      <Stack.Screen name="register" options={{ headerShown: false }} />
+    </Stack>
   );
 }
 
@@ -71,14 +80,10 @@ export default function RootLayout() {
   }
 
   return (
-    <StoreProvider>
-      <RootTabsLayout />
-    </StoreProvider>
+    <AuthProvider>
+      <StoreProvider>
+        <RootNavigator />
+      </StoreProvider>
+    </AuthProvider>
   );
 }
-
-const styles = StyleSheet.create({
-  flexOne: {
-    flex: 1,
-  },
-});

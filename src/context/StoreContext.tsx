@@ -3,6 +3,7 @@ import { doc, onSnapshot, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppState, Fish, HistoryEntry, Pond, SaleInfo } from '@/lib/types';
 import { fLabel, uid } from '@/lib/format';
+import { useAuth } from '@/context/AuthContext';
 
 export type SheetType =
   | 'addFish'
@@ -77,6 +78,7 @@ const initialAppState: AppState = {
 };
 
 export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [state, setState] = useState<AppState>(initialAppState);
   const [isLoaded, setIsLoaded] = useState(false);
 
@@ -106,9 +108,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [toastMessage]);
 
-  // Listen to Cloud Firestore in real-time
+  // Listen to Cloud Firestore in real-time, isolated per user UID
   useEffect(() => {
-    const docRef = doc(db, 'app_data', 'main_store');
+    if (!user) {
+      setState(initialAppState);
+      setIsLoaded(true);
+      return;
+    }
+
+    setIsLoaded(false);
+    const docRef = doc(db, 'user_stores', user.uid);
     const unsubscribe = onSnapshot(
       docRef,
       (docSnap) => {
@@ -127,29 +136,43 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
             });
           }
+        } else {
+          // Initialize starter isolated farm data if not yet created in Firestore
+          const defaultInitialState: AppState = {
+            ponds: [
+              { id: 'pond-1', userId: user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
+              { id: 'pond-2', userId: user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
+            ],
+            fish: [],
+            history: [],
+            varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
+          };
+          setDoc(docRef, defaultInitialState).catch(console.error);
+          setState(defaultInitialState);
         }
         setIsLoaded(true);
       },
       (error) => {
-        console.error('Failed to listen to Firestore changes:', error);
+        console.error('Failed to listen to Firestore user store changes:', error);
         setIsLoaded(true);
       }
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
-  // Save to Cloud Firestore
+  // Save to Cloud Firestore, bound to user UID
   const saveState = useCallback(async (newState: AppState) => {
     setState(newState);
+    if (!user) return;
     try {
-      const docRef = doc(db, 'app_data', 'main_store');
+      const docRef = doc(db, 'user_stores', user.uid);
       await setDoc(docRef, newState);
     } catch (e) {
       console.error('Failed to save data to Firestore:', e);
       showToast('Gagal menyimpan data ke Firestore.');
     }
-  }, [showToast]);
+  }, [user, showToast]);
 
   const openSheet = useCallback((type: SheetType, data?: any) => {
     setActiveSheet({ type, data });
@@ -173,11 +196,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const newFish: Fish = {
         ...fishData,
         id: uid(),
+        userId: user?.uid,
         tgl: new Date().toISOString(),
       };
       const pondName = state.ponds.find((p) => p.id === newFish.kolamId)?.name || '-';
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user?.uid,
         ts: new Date().toISOString(),
         tipe: 'masuk',
         judul: 'Ikan masuk',
@@ -208,7 +233,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Ikan ditambahkan');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
 
@@ -386,12 +411,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     (name: string, lokasi: string) => {
       const newPond: Pond = {
         id: uid(),
+        userId: user?.uid,
         name,
         lokasi,
       };
 
       const historyItem: HistoryEntry = {
         id: uid(),
+        userId: user?.uid,
         ts: new Date().toISOString(),
         tipe: 'edit_kolam',
         judul: 'Tambah kolam',
@@ -409,7 +436,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Kolam ditambahkan');
     },
-    [state, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast]
   );
 
   const editPond = useCallback(

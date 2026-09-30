@@ -1,11 +1,13 @@
 export interface Pond {
   id: string;
+  userId?: string;
   name: string;
   lokasi: string;
 }
 
 export interface Fish {
   id: string;
+  userId?: string;
   foto: string | null;
   varietas: string;
   asal: string;
@@ -33,6 +35,7 @@ export interface SaleInfo {
 
 export interface HistoryEntry {
   id: string;
+  userId?: string;
   ts: string; // ISO string
   tipe: 'masuk' | 'keluar' | 'edit_ikan' | 'edit_kolam';
   judul: string;
@@ -50,5 +53,12 @@ export interface AppState {
   fish: Fish[];
   history: HistoryEntry[];
   varietyHistory: string[];
+}
+
+export interface UserProfile {
+  uid: string;
+  name: string;
+  email: string;
+  createdAt: string;
 }
 
