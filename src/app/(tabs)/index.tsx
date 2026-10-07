@@ -121,7 +121,7 @@ export default function DashboardScreen() {
       style={[styles.container, { backgroundColor: theme.bg }]}
       contentContainerStyle={[
         styles.content,
-        { paddingBottom: 110 + Math.max(insets.bottom, 12) },
+        { paddingBottom: 130 + Math.max(insets.bottom, 12) },
       ]}
       showsVerticalScrollIndicator={false}
     >
@@ -155,46 +155,56 @@ export default function DashboardScreen() {
         <View style={[styles.tile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.tileTitle, { color: theme.muted }]}>🏊 Total kolam</Text>
           <Text style={[styles.tileNum, { color: theme.ink }]}>{state.ponds.length}</Text>
-          <Text style={[styles.tileSub, { color: theme.muted }]}>
-            {occupiedPondsCount} terisi
-          </Text>
+          <View style={[styles.tileBadge, { backgroundColor: theme.accentSoft }]}>
+            <Text style={[styles.tileBadgeText, { color: theme.accent }]}>{occupiedPondsCount} terisi</Text>
+          </View>
         </View>
 
         <View style={[styles.tile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.tileTitle, { color: theme.muted }]}>📥 Ikan masuk</Text>
           <Text style={[styles.tileNum, { color: theme.ink }]}>{masukCount}</Text>
-          <Text style={[styles.tileSub, { color: theme.muted }]}>{periodLabel}</Text>
+          <View style={[styles.tileBadge, { backgroundColor: theme.okSoft }]}>
+            <Text style={[styles.tileBadgeText, { color: theme.ok }]}>{periodLabel}</Text>
+          </View>
         </View>
 
         <View style={[styles.tile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           <Text style={[styles.tileTitle, { color: theme.muted }]}>📤 Ikan keluar</Text>
           <Text style={[styles.tileNum, { color: theme.ink }]}>{keluarCount}</Text>
           <Text style={[styles.tileSub, { color: theme.muted }]}>
-            {soldCount} terjual, {movedCount} pindah kolam
+            {soldCount} terjual · {movedCount} pindah
           </Text>
         </View>
 
         <View style={[styles.tile, { backgroundColor: theme.surface, borderColor: theme.line }]}>
-          <Text style={[styles.tileTitle, { color: theme.muted }]}>Estimasi laba kotor</Text>
+          <Text style={[styles.tileTitle, { color: theme.muted }]}>Est. laba kotor</Text>
           <Text style={[styles.tileNumSmall, { color: theme.ink }]}>{rp(laba)}</Text>
           <Text style={[styles.tileSub, { color: theme.muted }]}>dari harga beli</Text>
         </View>
       </View>
 
-      {/* Red Sales Ribbon */}
+      {/* Sales Ribbon */}
       <View style={[styles.ribbon, { backgroundColor: theme.red }]}>
+        <View style={styles.ribbonGloss} />
         <View>
-          <Text style={styles.ribbonSmall}>💰 Total penjualan, {periodLabel}</Text>
+          <Text style={styles.ribbonSmall}>💰 Total penjualan · {periodLabel}</Text>
           <Text style={styles.ribbonNum}>{rp(omzet)}</Text>
         </View>
         <View style={styles.ribbonRight}>
-          <Text style={styles.ribbonSmall}>{soldList.length} transaksi</Text>
-          <Text style={styles.ribbonSmall}>{soldCount} ekor terjual</Text>
+          <View style={styles.ribbonPill}>
+            <Text style={styles.ribbonPillText}>{soldList.length} transaksi</Text>
+          </View>
+          <Text style={[styles.ribbonSmall, { marginTop: 4 }]}>{soldCount} ekor terjual</Text>
         </View>
       </View>
 
       {/* Stock Information Section */}
-      <Text style={[styles.secTitle, { color: theme.ink }]}>⚠️ Informasi stok</Text>
+      <View style={styles.secTitleRow}>
+        <Text style={[styles.secTitle, { color: theme.ink }]}>Informasi stok</Text>
+        <View style={[styles.secBadge, { backgroundColor: theme.goldSoft }]}>
+          <Text style={[styles.secBadgeText, { color: theme.gold }]}>⚠️ {alerts.length} notif</Text>
+        </View>
+      </View>
       <View style={styles.alertsContainer}>
         {alerts.length > 0 ? (
           alerts.map((a, i) => (
@@ -203,10 +213,10 @@ export default function DashboardScreen() {
               style={[
                 styles.alertCard,
                 a.type === 'bad'
-                  ? { backgroundColor: theme.badSoft }
+                  ? { backgroundColor: theme.badSoft, borderLeftColor: theme.bad }
                   : a.type === 'warn'
-                  ? { backgroundColor: theme.goldSoft }
-                  : { backgroundColor: theme.okSoft },
+                  ? { backgroundColor: theme.goldSoft, borderLeftColor: theme.gold }
+                  : { backgroundColor: theme.okSoft, borderLeftColor: theme.ok },
               ]}
             >
               <Text style={styles.alertIcon}>{a.icon}</Text>
@@ -214,7 +224,7 @@ export default function DashboardScreen() {
             </View>
           ))
         ) : (
-          <View style={[styles.alertCard, { backgroundColor: theme.okSoft }]}>
+          <View style={[styles.alertCard, { backgroundColor: theme.okSoft, borderLeftColor: theme.ok }]}>
             <Text style={styles.alertIcon}>✅</Text>
             <Text style={[styles.alertText, { color: theme.ink }]}>Semua stok aman.</Text>
           </View>
@@ -222,7 +232,10 @@ export default function DashboardScreen() {
       </View>
 
       {/* Recent Transactions Summary */}
-      <Text style={[styles.secTitle, { color: theme.ink }]}>📊 Ringkasan transaksi</Text>
+      <View style={styles.secTitleRow}>
+        <Text style={[styles.secTitle, { color: theme.ink }]}>Ringkasan transaksi</Text>
+        <Text style={[styles.secSubtitle, { color: theme.muted }]}>📊 5 terbaru</Text>
+      </View>
       {recentSales.length > 0 ? (
         <View style={[styles.trxBox, { backgroundColor: theme.surface, borderColor: theme.line }]}>
           {recentSales.map((h, idx) => (
@@ -261,7 +274,10 @@ export default function DashboardScreen() {
       )}
 
       {/* Pond Distribution Bar Chart */}
-      <Text style={[styles.secTitle, { color: theme.ink }]}>Sebaran ikan per kolam</Text>
+      <View style={styles.secTitleRow}>
+        <Text style={[styles.secTitle, { color: theme.ink }]}>Sebaran per kolam</Text>
+        <Text style={[styles.secSubtitle, { color: theme.muted }]}>🏊 distribusi</Text>
+      </View>
       <View style={styles.barsContainer}>
         {state.ponds.map((p) => {
           const count = sum(
@@ -302,70 +318,131 @@ const styles = StyleSheet.create({
   },
   chipsRow: {
     flexDirection: 'row',
-    marginBottom: 12,
+    marginBottom: 14,
   },
   pairGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-    marginBottom: 10,
+    marginBottom: 12,
   },
   tile: {
     width: '48.5%',
     borderWidth: 1,
-    borderRadius: 18,
-    padding: 14,
+    borderRadius: 20,
+    padding: 16,
+    gap: 2,
   },
   tileTitle: {
     fontFamily: FontNames.sansSemiBold,
-    fontSize: 13.5,
+    fontSize: 12.5,
+    letterSpacing: 0.1,
+    marginBottom: 4,
   },
   tileNum: {
     fontFamily: FontNames.serifExtraBold,
-    fontSize: 32,
-    lineHeight: 36,
-    marginVertical: 2,
+    fontSize: 34,
+    lineHeight: 38,
+    letterSpacing: -1,
+    marginBottom: 6,
   },
   tileNumSmall: {
     fontFamily: FontNames.serifExtraBold,
-    fontSize: 24,
-    lineHeight: 30,
-    marginVertical: 4,
+    fontSize: 22,
+    lineHeight: 28,
+    letterSpacing: -0.5,
+    marginBottom: 6,
   },
   tileSub: {
     fontFamily: FontNames.sansMedium,
-    fontSize: 12.5,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  tileBadge: {
+    alignSelf: 'flex-start',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginTop: 2,
+  },
+  tileBadgeText: {
+    fontFamily: FontNames.sansSemiBold,
+    fontSize: 11,
   },
   ribbon: {
-    borderRadius: 20,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    marginBottom: 10,
+    borderRadius: 22,
+    paddingHorizontal: 20,
+    paddingVertical: 18,
+    marginBottom: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-end',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  ribbonGloss: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: '50%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 22,
   },
   ribbonSmall: {
     color: '#ffffff',
     fontFamily: FontNames.sansSemiBold,
-    fontSize: 13,
+    fontSize: 12.5,
     opacity: 0.9,
+    letterSpacing: 0.1,
   },
   ribbonNum: {
     color: '#ffffff',
     fontFamily: FontNames.serifExtraBold,
-    fontSize: 34,
-    lineHeight: 38,
-    marginTop: 2,
+    fontSize: 32,
+    lineHeight: 36,
+    marginTop: 4,
+    letterSpacing: -1,
   },
   ribbonRight: {
     alignItems: 'flex-end',
+    gap: 4,
+  },
+  ribbonPill: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  ribbonPillText: {
+    color: '#ffffff',
+    fontFamily: FontNames.sansBold,
+    fontSize: 12,
+  },
+  secTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 22,
+    marginBottom: 10,
   },
   secTitle: {
     fontFamily: FontNames.serifExtraBold,
-    fontSize: 19,
-    marginTop: 20,
-    marginBottom: 10,
+    fontSize: 18,
+    letterSpacing: -0.3,
+  },
+  secSubtitle: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 12.5,
+  },
+  secBadge: {
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  secBadgeText: {
+    fontFamily: FontNames.sansSemiBold,
+    fontSize: 11.5,
   },
   alertsContainer: {
     gap: 8,
@@ -373,28 +450,29 @@ const styles = StyleSheet.create({
   alertCard: {
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 11,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 10,
+    borderLeftWidth: 3,
   },
   alertIcon: {
     fontSize: 15,
   },
   alertText: {
     fontFamily: FontNames.sansMedium,
-    fontSize: 14,
+    fontSize: 13.5,
     flex: 1,
     lineHeight: 20,
   },
   trxBox: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   trxItem: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 13,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -406,18 +484,19 @@ const styles = StyleSheet.create({
   trxBuyer: {
     fontFamily: FontNames.sansBold,
     fontSize: 14.5,
+    letterSpacing: 0.1,
   },
   trxSub: {
     fontFamily: FontNames.sansMedium,
     fontSize: 12.5,
-    marginTop: 1,
+    marginTop: 2,
   },
   trxPrice: {
     fontFamily: FontNames.serifBold,
-    fontSize: 16,
+    fontSize: 15.5,
   },
   barsContainer: {
-    gap: 8,
+    gap: 10,
     marginVertical: 4,
   },
   barRow: {
@@ -428,11 +507,11 @@ const styles = StyleSheet.create({
   barName: {
     width: 110,
     fontFamily: FontNames.sansMedium,
-    fontSize: 13.5,
+    fontSize: 13,
   },
   barTrack: {
     flex: 1,
-    height: 12,
+    height: 10,
     borderRadius: 99,
     overflow: 'hidden',
   },
@@ -443,7 +522,7 @@ const styles = StyleSheet.create({
   barCount: {
     width: 34,
     fontFamily: FontNames.sansBold,
-    fontSize: 13.5,
+    fontSize: 13,
     textAlign: 'right',
   },
 });
