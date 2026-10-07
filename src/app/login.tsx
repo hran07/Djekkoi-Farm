@@ -220,7 +220,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   brandTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 28,
     marginTop: 6,
     letterSpacing: 0.5,

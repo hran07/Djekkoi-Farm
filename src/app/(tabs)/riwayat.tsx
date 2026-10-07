@@ -103,7 +103,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
     marginTop: 6,

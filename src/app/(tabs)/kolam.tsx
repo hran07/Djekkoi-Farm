@@ -156,7 +156,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
     marginTop: 4,

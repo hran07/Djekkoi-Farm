@@ -162,7 +162,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
   },
   modalTitle: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansSemiBold,
     fontSize: 17,
   },
   closeText: {

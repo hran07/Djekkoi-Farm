@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
     marginTop: 6,
@@ -141,7 +141,7 @@ const styles = StyleSheet.create({
     marginTop: 22,
   },
   secTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 19,
     marginBottom: 10,
   },
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   varietas: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansSemiBold,
     fontSize: 16,
   },
   meta: {

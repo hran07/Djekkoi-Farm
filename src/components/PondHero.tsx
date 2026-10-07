@@ -328,7 +328,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.3,
   },
   bigNumber: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 64,
     color: '#eaf6f6',
     lineHeight: 70,
@@ -358,7 +358,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.6,
   },
   footValue: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 20,
     color: '#eaf6f6',
     lineHeight: 26,

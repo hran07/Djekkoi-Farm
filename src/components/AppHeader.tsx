@@ -104,13 +104,13 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 21,
     lineHeight: 26,
     letterSpacing: -0.3,
   },
   titleAccent: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 21,
     lineHeight: 26,
     letterSpacing: -0.3,

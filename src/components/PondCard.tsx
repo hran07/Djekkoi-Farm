@@ -77,7 +77,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   name: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 21,
     lineHeight: 25,
   },
@@ -91,7 +91,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   num: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 28,
     lineHeight: 30,
   },

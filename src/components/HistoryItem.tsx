@@ -163,7 +163,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   salePrice: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansSemiBold,
     fontSize: 14.5,
   },
   perUnit: {

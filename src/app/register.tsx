@@ -418,7 +418,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   brandTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     marginTop: 4,
     letterSpacing: 0.5,

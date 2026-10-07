@@ -177,7 +177,7 @@ const styles = StyleSheet.create({
     fontSize: 14.5,
   },
   totalAmount: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 24,
   },
   textArea: {

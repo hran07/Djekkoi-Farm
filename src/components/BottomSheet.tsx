@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
     paddingBottom: 10,
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 22,
     flex: 1,
     marginRight: 10,

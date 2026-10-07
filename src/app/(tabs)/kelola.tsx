@@ -352,7 +352,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   pageTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
   },
@@ -378,7 +378,7 @@ const styles = StyleSheet.create({
     paddingTop: 14,
   },
   sectionTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 22,
     lineHeight: 28,
     marginBottom: 4,

@@ -340,14 +340,14 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   tileNum: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 34,
     lineHeight: 38,
     letterSpacing: -1,
     marginBottom: 6,
   },
   tileNumSmall: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 22,
     lineHeight: 28,
     letterSpacing: -0.5,
@@ -398,7 +398,7 @@ const styles = StyleSheet.create({
   },
   ribbonNum: {
     color: '#ffffff',
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 32,
     lineHeight: 36,
     marginTop: 4,
@@ -427,7 +427,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   secTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 18,
     letterSpacing: -0.3,
   },
@@ -492,7 +492,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   trxPrice: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 15.5,
   },
   barsContainer: {

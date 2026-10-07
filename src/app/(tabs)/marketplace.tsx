@@ -145,7 +145,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 16 },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
     marginTop: 6,
@@ -180,7 +180,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   comingSoonTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 20,
     textAlign: 'center',
   },

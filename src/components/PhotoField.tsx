@@ -245,7 +245,7 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   modalTitle: {
-    fontFamily: FontNames.serifBold,
+    fontFamily: FontNames.sansSemiBold,
     fontSize: 18,
     marginBottom: 12,
   },

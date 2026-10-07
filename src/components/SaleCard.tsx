@@ -104,12 +104,12 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   title: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 20,
     lineHeight: 24,
   },
   price: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 22,
     lineHeight: 26,
     marginBottom: 4,

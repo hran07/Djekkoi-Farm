@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   varietas: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 18,
     lineHeight: 22,
     flex: 1,

@@ -357,7 +357,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 16 },
   pageTitle: {
-    fontFamily: FontNames.serifExtraBold,
+    fontFamily: FontNames.sansBold,
     fontSize: 26,
     lineHeight: 30,
     marginTop: 6,
@@ -366,7 +366,7 @@ const styles = StyleSheet.create({
   pageSub: { fontFamily: FontNames.sansMedium, fontSize: 14, marginBottom: 20 },
   avatarSection: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 24 },
   avatarCircle: { width: 62, height: 62, borderRadius: 31, alignItems: 'center', justifyContent: 'center' },
-  avatarLetter: { fontFamily: FontNames.serifExtraBold, fontSize: 28, lineHeight: 32 },
+  avatarLetter: { fontFamily: FontNames.sansBold, fontSize: 28, lineHeight: 32 },
   profileName: { fontFamily: FontNames.sansBold, fontSize: 18, lineHeight: 22 },
   profileEmail: { fontFamily: FontNames.sansMedium, fontSize: 13, marginTop: 2 },
   sectionLabel: {
