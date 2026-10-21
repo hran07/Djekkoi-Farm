@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { doc, onSnapshot, setDoc } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, deleteDoc, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { AppState, Fish, HistoryEntry, Pond, SaleInfo } from '@/lib/types';
+import { AppState, Fish, HistoryEntry, Pond, SaleInfo, MarketplaceProduct } from '@/lib/types';
 import { fLabel, uid } from '@/lib/format';
 import { useAuth } from '@/context/AuthContext';
 
@@ -28,6 +28,10 @@ interface StoreContextType {
   // Data State
   state: AppState;
   isLoaded: boolean;
+
+  // Marketplace Global State (Semua produk dari semua user yang dijual)
+  marketplaceProducts: MarketplaceProduct[];
+  isMarketplaceLoaded: boolean;
 
   // UI State
   searchQuery: string;
@@ -85,6 +89,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [state, setState] = useState<AppState>(initialAppState);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Marketplace State (Produk dari SEMUA pengguna)
+  const [marketplaceProducts, setMarketplaceProducts] = useState<MarketplaceProduct[]>([]);
+  const [isMarketplaceLoaded, setIsMarketplaceLoaded] = useState(false);
+
   // UI filters
   const [searchQuery, setSearchQuery] = useState('');
   const [pondFilter, setPondFilter] = useState('all');
@@ -105,6 +113,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const clearStore = useCallback(() => {
     setState(initialAppState);
     setIsLoaded(false);
+    setMarketplaceProducts([]);
+    setIsMarketplaceLoaded(false);
     setSearchQuery('');
     setPondFilter('all');
     setActivePondDetailId(null);
@@ -113,6 +123,58 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActiveSheet(null);
     setToastMessage(null);
   }, []);
+
+  // Listen to ALL Marketplace products in real-time
+  useEffect(() => {
+    if (!user) {
+      setMarketplaceProducts([]);
+      setIsMarketplaceLoaded(true);
+      return;
+    }
+
+    const colRef = collection(db, 'marketplace_products');
+    const unsubscribe = onSnapshot(
+      colRef,
+      (snapshot) => {
+        const items: MarketplaceProduct[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data();
+          if (d.display !== false) {
+            items.push({
+              id: docSnap.id,
+              userId: d.userId,
+              sellerName: d.sellerName || 'Peternak Djekkoi',
+              sellerEmail: d.sellerEmail || '',
+              varietas: d.varietas || '',
+              asal: d.asal || '',
+              jumlah: Number(d.jumlah) || 1,
+              ukuran: Number(d.ukuran) || 0,
+              grade: d.grade || 'A',
+              kelamin: d.kelamin || 'Belum diketahui',
+              kondisi: d.kondisi || 'Sehat',
+              hargaBeli: Number(d.hargaBeli) || 0,
+              hargaJual: Number(d.hargaJual) || 0,
+              kolamId: d.kolamId || '',
+              kolamName: d.kolamName || '',
+              catatan: d.catatan || '',
+              display: true,
+              foto: d.foto || null,
+              tgl: d.tgl || new Date().toISOString(),
+              updatedAt: d.updatedAt || new Date().toISOString(),
+            });
+          }
+        });
+        setMarketplaceProducts(items);
+        setIsMarketplaceLoaded(true);
+      },
+      (error) => {
+        console.warn('Failed to listen to marketplace products:', error);
+        setIsMarketplaceLoaded(true);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
 
   useEffect(() => {
     if (toastMessage) {
@@ -169,6 +231,43 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               fish: userFish,
               history: userHistory,
               varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
+            });
+
+            // Sinkronkan otomatis ikan berstatus display=true milik user ini ke koleksi marketplace_products publik
+            userFish.forEach((f) => {
+              const pondName = userPonds.find((p) => p.id === f.kolamId)?.name || '-';
+              const sellerName = user.displayName || user.email?.split('@')[0] || 'Peternak Djekkoi';
+              const mktRef = doc(db, 'marketplace_products', f.id);
+              if (f.display) {
+                setDoc(
+                  mktRef,
+                  {
+                    id: f.id,
+                    userId: user.uid,
+                    sellerName,
+                    sellerEmail: user.email || '',
+                    varietas: f.varietas,
+                    asal: f.asal,
+                    jumlah: f.jumlah,
+                    ukuran: f.ukuran,
+                    grade: f.grade,
+                    kelamin: f.kelamin,
+                    kondisi: f.kondisi,
+                    hargaBeli: f.hargaBeli,
+                    hargaJual: f.hargaJual,
+                    kolamId: f.kolamId,
+                    kolamName: pondName,
+                    catatan: f.catatan,
+                    display: true,
+                    foto: f.foto,
+                    tgl: f.tgl,
+                    updatedAt: new Date().toISOString(),
+                  },
+                  { merge: true }
+                ).catch(() => {});
+              } else {
+                deleteDoc(mktRef).catch(() => {});
+              }
             });
           }
         } else {
@@ -232,6 +331,51 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     [state.ponds]
   );
 
+  // Helper untuk sinkronisasi produk ke koleksi publik marketplace_products
+  const syncToMarketplace = useCallback(
+    async (fish: Fish, isDisplay: boolean) => {
+      if (!user) return;
+      try {
+        const mktDocRef = doc(db, 'marketplace_products', fish.id);
+        if (isDisplay) {
+          const pondName = state.ponds.find((p) => p.id === fish.kolamId)?.name || '-';
+          const sellerName = user.displayName || user.email?.split('@')[0] || 'Peternak Djekkoi';
+          await setDoc(
+            mktDocRef,
+            {
+              id: fish.id,
+              userId: user.uid,
+              sellerName,
+              sellerEmail: user.email || '',
+              varietas: fish.varietas,
+              asal: fish.asal,
+              jumlah: fish.jumlah,
+              ukuran: fish.ukuran,
+              grade: fish.grade,
+              kelamin: fish.kelamin,
+              kondisi: fish.kondisi,
+              hargaBeli: fish.hargaBeli,
+              hargaJual: fish.hargaJual,
+              kolamId: fish.kolamId,
+              kolamName: pondName,
+              catatan: fish.catatan,
+              display: true,
+              foto: fish.foto,
+              tgl: fish.tgl,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } else {
+          await deleteDoc(mktDocRef);
+        }
+      } catch (err) {
+        console.warn('Sync to marketplace error:', err);
+      }
+    },
+    [user, state.ponds]
+  );
+
   // Data Actions (Semua menyertakan userId pengguna yang login)
   const addFish = useCallback(
     (fishData: Omit<Fish, 'id' | 'tgl'>) => {
@@ -274,10 +418,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       saveState(newState);
+
+      // Sinkronkan ke marketplace_products publik jika dipilih untuk dijual
+      if (newFish.display) {
+        syncToMarketplace(newFish, true);
+      }
+
       closeSheet();
       showToast('Ikan ditambahkan');
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
   );
 
   const editFish = useCallback(
@@ -305,10 +455,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       saveState(newState);
+
+      // Sinkronkan pembaruan ikan ke marketplace_products
+      const updatedFish = { ...fishItem, ...updates, userId: user.uid };
+      const willDisplay = updates.display !== undefined ? updates.display : fishItem.display;
+      syncToMarketplace(updatedFish, willDisplay);
+
       closeSheet();
       showToast('Perubahan disimpan');
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
   );
 
   const sellFish = useCallback(
@@ -322,10 +478,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       let updatedFishList: Fish[];
       if (fishItem.jumlah - count <= 0) {
         updatedFishList = state.fish.filter((f) => f.id !== id);
+        // Hapus dari marketplace karena stok habis
+        deleteDoc(doc(db, 'marketplace_products', id)).catch(() => {});
       } else {
+        const remainingCount = fishItem.jumlah - count;
         updatedFishList = state.fish.map((f) =>
-          f.id === id ? { ...f, jumlah: f.jumlah - count, userId: user.uid } : f
+          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f
         );
+        // Perbarui jumlah stok di marketplace jika aktif
+        if (fishItem.display) {
+          syncToMarketplace({ ...fishItem, jumlah: remainingCount }, true);
+        }
       }
 
       const historyItem: HistoryEntry = {
@@ -352,7 +515,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       closeSheet();
       showToast('Penjualan dicatat');
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
   );
 
   const moveFish = useCallback(
@@ -437,6 +600,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       saveState(newState);
+
+      // Hapus juga dari marketplace publik jika ada
+      deleteDoc(doc(db, 'marketplace_products', id)).catch(() => {});
+
       closeSheet();
       showToast('Data ikan dihapus');
     },
@@ -459,10 +626,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
 
       saveState(newState);
+
+      // Sinkronkan langsung ke marketplace_products publik
+      syncToMarketplace({ ...fishItem, display: newDisplay }, newDisplay);
+
       closeSheet();
-      showToast(newDisplay ? 'Ditampilkan di penjualan' : 'Disembunyikan dari penjualan');
+      showToast(newDisplay ? 'Produk terhubung ke Marketplace' : 'Produk ditarik dari Marketplace');
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
   );
 
   const addPond = useCallback(
@@ -611,16 +782,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     };
     setPondFilter('all');
     setActivePondDetailId(null);
+
+    // Hapus semua ikan dari marketplace publik
+    state.fish.forEach((f) => {
+      deleteDoc(doc(db, 'marketplace_products', f.id)).catch(() => {});
+    });
+
     saveState(emptyState);
     closeSheet();
     showToast('Semua data dihapus');
-  }, [user, saveState, closeSheet, showToast]);
+  }, [user, state.fish, saveState, closeSheet, showToast]);
 
   return (
     <StoreContext.Provider
       value={{
         state,
         isLoaded,
+        marketplaceProducts,
+        isMarketplaceLoaded,
         searchQuery,
         setSearchQuery,
         pondFilter,

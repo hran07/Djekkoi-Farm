@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput } from 'react-native';
+import { View, Text, StyleSheet, TextInput, TouchableOpacity } from 'react-native';
+import Svg, { Path } from 'react-native-svg';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames, COND } from '@/constants/theme';
 import { Fish } from '@/lib/types';
@@ -24,6 +25,7 @@ export const EditFishSheet: React.FC<EditFishSheetProps> = ({ fish }) => {
   const [hargaJual, setHargaJual] = useState(fish.hargaJual.toString());
   const [kondisi, setKondisi] = useState(fish.kondisi);
   const [catatan, setCatatan] = useState(fish.catatan);
+  const [display, setDisplay] = useState<boolean>(fish.display ?? true);
 
   const handleSubmit = () => {
     const numUkuran = parseFloat(ukuran) || fish.ukuran;
@@ -64,6 +66,11 @@ export const EditFishSheet: React.FC<EditFishSheetProps> = ({ fish }) => {
     if (foto !== fish.foto) {
       otherDetails.push('Foto diganti');
     }
+    if (display !== fish.display) {
+      otherDetails.push(
+        display ? 'Ditampilkan di penjualan' : 'Disembunyikan dari penjualan'
+      );
+    }
     if (otherDetails.length > 0) {
       logEntries.push({
         judul: 'Ubah data ikan',
@@ -71,7 +78,7 @@ export const EditFishSheet: React.FC<EditFishSheetProps> = ({ fish }) => {
       });
     }
 
-    if (logEntries.length === 0 && foto === fish.foto) {
+    if (logEntries.length === 0 && foto === fish.foto && display === fish.display) {
       showToast('Tidak ada perubahan data');
       return;
     }
@@ -85,6 +92,7 @@ export const EditFishSheet: React.FC<EditFishSheetProps> = ({ fish }) => {
         hargaJual: numHargaJual,
         kondisi,
         catatan: trimmedCatatan,
+        display,
       },
       logEntries
     );
@@ -160,6 +168,32 @@ export const EditFishSheet: React.FC<EditFishSheetProps> = ({ fish }) => {
         />
       </Field>
 
+      <TouchableOpacity
+        style={styles.chkRow}
+        onPress={() => setDisplay(!display)}
+        accessibilityRole="checkbox"
+        accessibilityState={{ checked: display }}
+      >
+        <View
+          style={[
+            styles.checkbox,
+            {
+              backgroundColor: display ? theme.accent : theme.surface,
+              borderColor: display ? theme.accent : theme.line,
+            },
+          ]}
+        >
+          {display && (
+            <Svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="#ffffff" strokeWidth={3}>
+              <Path d="M20 6L9 17l-5-5" />
+            </Svg>
+          )}
+        </View>
+        <Text style={[styles.chkText, { color: theme.ink }]}>
+          Tampilkan di penjualan (Marketplace)
+        </Text>
+      </TouchableOpacity>
+
       <Text style={[styles.note, { color: theme.muted }]}>
         Perubahan ukuran dan harga otomatis tercatat di riwayat.
       </Text>
@@ -194,6 +228,24 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 76,
     textAlignVertical: 'top',
+  },
+  chkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 1.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chkText: {
+    fontFamily: FontNames.sansSemiBold,
+    fontSize: 14,
   },
   note: {
     fontFamily: FontNames.sansMedium,

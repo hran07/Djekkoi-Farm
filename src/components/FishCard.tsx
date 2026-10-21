@@ -57,7 +57,10 @@ export const FishCard: React.FC<FishCardProps> = ({ fish, onPress }) => {
           <Text style={[styles.varietas, { color: theme.ink }]} numberOfLines={1}>
             {fish.varietas}
           </Text>
-          <Badge label={fish.kondisi} type={getConditionBadgeType(fish.kondisi)} />
+          <View style={styles.badgeRow}>
+            {fish.display && <Badge label="Marketplace" type="acc" />}
+            <Badge label={fish.kondisi} type={getConditionBadgeType(fish.kondisi)} />
+          </View>
         </View>
 
         <Text style={[styles.meta, { color: theme.muted }]}>
@@ -106,6 +109,11 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   varietas: {
     fontFamily: FontNames.sansBold,

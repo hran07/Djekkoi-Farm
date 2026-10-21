@@ -64,3 +64,10 @@ export interface UserProfile {
   createdAt: string;
 }
 
+export interface MarketplaceProduct extends Fish {
+  sellerName?: string;
+  sellerEmail?: string;
+  kolamName?: string;
+  updatedAt?: string;
+}
+

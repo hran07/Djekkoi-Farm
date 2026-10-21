@@ -24,17 +24,6 @@ export const AddFishSheet: React.FC<AddFishSheetProps> = ({ defaultPondId }) => 
   const theme = useTheme();
   const { state, addFish, pondFilter, showToast, openSheet, deleteVarietyHistory } = useStore();
 
-  useEffect(() => {
-    if (state.ponds.length === 0) {
-      showToast('Tambah kolam dulu sebelum menambah ikan');
-      openSheet('addPond');
-    }
-  }, [state.ponds.length, showToast, openSheet]);
-
-  if (state.ponds.length === 0) {
-    return null;
-  }
-
   const initialPondId =
     defaultPondId ||
     (pondFilter !== 'all' ? pondFilter : state.ponds[0]?.id || '');
@@ -52,6 +41,17 @@ export const AddFishSheet: React.FC<AddFishSheetProps> = ({ defaultPondId }) => 
   const [kolamId, setKolamId] = useState(initialPondId);
   const [catatan, setCatatan] = useState('');
   const [display, setDisplay] = useState(true);
+
+  useEffect(() => {
+    if (state.ponds.length === 0) {
+      showToast('Tambah kolam dulu sebelum menambah ikan');
+      openSheet('addPond');
+    }
+  }, [state.ponds.length, showToast, openSheet]);
+
+  if (state.ponds.length === 0) {
+    return null;
+  }
 
   const pondOptions = state.ponds.map((p) => ({ label: p.name, value: p.id }));
 
@@ -313,7 +313,7 @@ export const AddFishSheet: React.FC<AddFishSheetProps> = ({ defaultPondId }) => 
           )}
         </View>
         <Text style={[styles.chkText, { color: theme.ink }]}>
-          Tampilkan di display penjualan
+          Tampilkan di penjualan (Marketplace)
         </Text>
       </TouchableOpacity>
 

@@ -144,7 +144,7 @@ const styles = StyleSheet.create({
     minHeight: 56,
   },
   activePill: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     borderRadius: 22,
     marginHorizontal: 2,
     marginVertical: 2,

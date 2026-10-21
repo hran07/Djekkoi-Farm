@@ -31,7 +31,16 @@ service cloud.firestore {
       }
     }
 
-    // 3. Blokir semua akses lain secara default (termasuk dokumen legacy app_data)
+    // 3. Marketplace Bersama (Collection: marketplace_products)
+    // Semua pengguna yang login dapat melihat produk ikan yang aktif dijual oleh siapa saja (User A, User B, dll)
+    // Hanya pemilik produk (berdasarkan userId) yang dapat menambah, mengedit, atau menghapus produk miliknya
+    match /marketplace_products/{productId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
+      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+    }
+
+    // 4. Blokir semua akses lain secara default
     match /{document=**} {
       allow read, write: if false;
     }
