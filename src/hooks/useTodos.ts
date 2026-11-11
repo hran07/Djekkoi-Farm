@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Todo, TodoPeriod } from '@/lib/types';
 import * as todoApi from '@/lib/todoApi';
 import { getPeriodKey } from '@/lib/todoPeriod';
@@ -7,7 +7,8 @@ import { useStore } from '@/context/StoreContext';
 export interface UseTodosReturn {
   todos: Todo[];
   status: 'loading' | 'success' | 'error';
-  reload: () => Promise<void>;
+  syncStatus: 'synced' | 'local';
+  reload: (forceRemote?: boolean) => Promise<void>;
   add: (title: string, period: TodoPeriod) => Promise<Todo>;
   toggle: (id: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
@@ -18,20 +19,32 @@ export function useTodos(userId?: string): UseTodosReturn {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>(
     userId ? 'loading' : 'success'
   );
+  const [syncStatus, setSyncStatus] = useState<'synced' | 'local'>('local');
+
   const { showToast } = useStore();
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     if (!userId) return;
 
+    // Batalkan request sebelumnya jika ada
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
     const fetchInitial = async () => {
       try {
-        const data = await todoApi.getTodos(userId);
+        const res = await todoApi.getTodos(userId, controller.signal);
         if (!cancelled) {
-          setTodos(data);
+          setTodos(res.todos);
+          setSyncStatus(res.isRemote ? 'synced' : 'local');
           setStatus('success');
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         if (!cancelled) {
           console.error('[useTodos] Gagal memuat todo:', err);
           setStatus('error');
@@ -43,29 +56,53 @@ export function useTodos(userId?: string): UseTodosReturn {
 
     return () => {
       cancelled = true;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [userId]);
 
-  const reload = useCallback(async () => {
-    if (!userId) return;
-    try {
-      const data = await todoApi.getTodos(userId);
-      setTodos(data);
-      setStatus('success');
-    } catch (err) {
-      console.error('[useTodos] Gagal memuat ulang todo:', err);
-      setStatus('error');
-    }
-  }, [userId]);
+  const reload = useCallback(
+    async (forceRemote: boolean = true) => {
+      if (!userId) return;
+
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      try {
+        const res = forceRemote
+          ? await todoApi.refreshTodos(userId, controller.signal)
+          : await todoApi.getTodos(userId, controller.signal);
+
+        setTodos(res.todos);
+        setSyncStatus(res.isRemote ? 'synced' : 'local');
+        setStatus('success');
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
+        console.error('[useTodos] Gagal memuat ulang todo:', err);
+        setStatus('error');
+      }
+    },
+    [userId]
+  );
 
   const add = useCallback(
     async (title: string, period: TodoPeriod): Promise<Todo> => {
       if (!userId) throw new Error('Pengguna belum login');
       try {
-        const newTodo = await todoApi.addTodo(userId, title, period);
+        const newTodo = await todoApi.addTodo(
+          userId,
+          title,
+          period,
+          abortControllerRef.current?.signal
+        );
         setTodos((prev) => [newTodo, ...prev]);
         return newTodo;
-      } catch (err) {
+      } catch (err: any) {
+        if (err?.name === 'AbortError') throw err;
         showToast('Gagal menambahkan todo');
         throw err;
       }
@@ -76,7 +113,6 @@ export function useTodos(userId?: string): UseTodosReturn {
   const toggle = useCallback(
     async (id: string) => {
       if (!userId) return;
-      const prevTodos = todos;
 
       // Optimistic update
       const optimisticTodos = todos.map((t) => {
@@ -94,14 +130,18 @@ export function useTodos(userId?: string): UseTodosReturn {
       setTodos(optimisticTodos);
 
       try {
-        await todoApi.toggleTodo(userId, id);
-      } catch (err) {
+        await todoApi.toggleTodo(
+          userId,
+          id,
+          abortControllerRef.current?.signal
+        );
+      } catch (err: any) {
+        if (err?.name === 'AbortError') return;
         console.error('[useTodos] Gagal toggle todo:', err);
-        setTodos(prevTodos);
-        showToast('Gagal memperbarui status todo');
+        // Pertahankan perubahan lokal sesuai spesifikasi local-first
       }
     },
-    [userId, todos, showToast]
+    [userId, todos]
   );
 
   const remove = useCallback(
@@ -114,7 +154,7 @@ export function useTodos(userId?: string): UseTodosReturn {
 
       try {
         await todoApi.deleteTodo(userId, id);
-      } catch (err) {
+      } catch (err: any) {
         console.error('[useTodos] Gagal menghapus todo:', err);
         setTodos(prevTodos);
         showToast('Gagal menghapus todo');
@@ -126,6 +166,7 @@ export function useTodos(userId?: string): UseTodosReturn {
   return {
     todos,
     status,
+    syncStatus,
     reload,
     add,
     toggle,

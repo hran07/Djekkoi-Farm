@@ -96,6 +96,7 @@ export interface Todo {
   period: TodoPeriod;
   lastCompletedKey: string | null;
   createdAt: string; // ISO
+  remoteId?: number;
 }
 
 

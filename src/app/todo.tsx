@@ -59,7 +59,7 @@ export default function TodoScreen() {
   const { user } = useAuth();
   const { showToast } = useStore();
 
-  const { todos, status, reload, add, toggle, remove } = useTodos(user?.uid);
+  const { todos, status, syncStatus, reload, add, toggle, remove } = useTodos(user?.uid);
 
   const [period, setPeriod] = useState<TodoPeriod>('harian');
   const [currentDate, setCurrentDate] = useState<Date>(() => new Date());
@@ -75,14 +75,14 @@ export default function TodoScreen() {
   useFocusEffect(
     useCallback(() => {
       setCurrentDate(new Date());
-      reload();
+      reload(false);
     }, [reload])
   );
 
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     setCurrentDate(new Date());
-    await reload();
+    await reload(true);
     setIsRefreshing(false);
   }, [reload]);
 
@@ -243,6 +243,24 @@ export default function TodoScreen() {
             onPress={() => setPeriod('mingguan')}
             accessibilityLabel="Filter Todo Mingguan"
           />
+        </View>
+
+        {/* ── Status Sinkronisasi Server ───────────────────────── */}
+        <View style={styles.syncStatusRow}>
+          <View
+            style={[
+              styles.syncDot,
+              {
+                backgroundColor:
+                  syncStatus === 'synced' ? theme.ok : theme.gold,
+              },
+            ]}
+          />
+          <Text style={[styles.syncStatusText, { color: theme.muted }]}>
+            {syncStatus === 'synced'
+              ? 'Tersinkron dengan server'
+              : 'Mode lokal (server tidak terjangkau)'}
+          </Text>
         </View>
 
         {/* ── Ringkasan Progress ─────────────────────────────────── */}
@@ -535,7 +553,23 @@ const styles = StyleSheet.create({
   segmentRow: {
     flexDirection: 'row',
     gap: 8,
-    marginBottom: 14,
+    marginBottom: 8,
+  },
+  syncStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 12,
+    paddingHorizontal: 2,
+  },
+  syncDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  syncStatusText: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 12,
   },
   progressCard: {
     borderWidth: 1,
