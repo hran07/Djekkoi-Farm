@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore, enableNetwork } from 'firebase/firestore';
+import { getFirestore, enableNetwork, disableNetwork } from 'firebase/firestore';
 import {
   initializeAuth,
   getAuth,
@@ -22,12 +22,27 @@ const firebaseConfig = {
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
 
+let reconnectPromise: Promise<void> | null = null;
+
 export async function forceFirestoreReconnect(): Promise<void> {
-  try {
-    await enableNetwork(db);
-  } catch (e) {
-    console.warn('forceFirestoreReconnect error:', e);
+  if (reconnectPromise) {
+    return reconnectPromise;
   }
+
+  reconnectPromise = (async () => {
+    try {
+      console.log('[Firestore] Reconnecting: disableNetwork -> enableNetwork...');
+      await disableNetwork(db);
+      await enableNetwork(db);
+      console.log('[Firestore] Reconnect successful, network enabled');
+    } catch (e) {
+      console.warn('[Firestore] forceFirestoreReconnect error:', e);
+    } finally {
+      reconnectPromise = null;
+    }
+  })();
+
+  return reconnectPromise;
 }
 
 let authInstance: Auth;

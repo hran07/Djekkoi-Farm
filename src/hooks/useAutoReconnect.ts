@@ -3,6 +3,20 @@ import { Platform, AppState, AppStateStatus } from 'react-native';
 import * as Network from 'expo-network';
 import { forceFirestoreReconnect } from '@/lib/firebase';
 
+export async function checkIsDeviceOnline(): Promise<boolean> {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
+    return navigator.onLine;
+  }
+  try {
+    const state = await Network.getNetworkStateAsync();
+    const connected = state.isConnected ?? true;
+    const reachable = state.isInternetReachable ?? connected;
+    return connected && reachable;
+  } catch {
+    return true;
+  }
+}
+
 export function useAutoReconnect(onReconnect: () => void, isEnabled: boolean) {
   useEffect(() => {
     if (!isEnabled) return;
@@ -11,6 +25,7 @@ export function useAutoReconnect(onReconnect: () => void, isEnabled: boolean) {
 
     const handleReconnect = async () => {
       if (!isMounted) return;
+      console.log('[AutoReconnect] Connection restored event detected!');
       await forceFirestoreReconnect();
       if (isMounted) {
         onReconnect();
@@ -55,4 +70,3 @@ export function useAutoReconnect(onReconnect: () => void, isEnabled: boolean) {
     };
   }, [onReconnect, isEnabled]);
 }
-

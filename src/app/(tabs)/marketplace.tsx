@@ -21,7 +21,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useStore } from '@/context/StoreContext';
 import { useTheme } from '@/hooks/useTheme';
 import { db, forceFirestoreReconnect } from '@/lib/firebase';
-import { useAutoReconnect } from '@/hooks/useAutoReconnect';
+import { useAutoReconnect, checkIsDeviceOnline } from '@/hooks/useAutoReconnect';
 import { rp } from '@/lib/format';
 import { MarketplaceProduct } from '@/lib/types';
 import {
@@ -38,6 +38,8 @@ type SortOption = 'newest' | 'price_asc' | 'price_desc' | 'size_desc';
 
 const PAGE_SIZE = 10;
 const FETCH_TIMEOUT_MS = 10000;
+const MAX_SILENT_RETRIES = 5;
+const SILENT_RETRY_INTERVAL_MS = 3000;
 
 function parseProduct(docSnap: QueryDocumentSnapshot): MarketplaceProduct {
   const d = docSnap.data();
@@ -158,19 +160,32 @@ export default function MarketplaceScreen() {
   const hasMoreRef = useRef(true);
   const fetchIdRef = useRef(0);
   const activeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const silentRetryTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const silentRetryCountRef = useRef(0);
 
-  // ─── Fetch First Page dengan 10 detik Timeout ─────────────────────
+  // ─── Fetch First Page dengan Timeout & Silent Option ───────────────
   const fetchFirstPage = useCallback(
-    async (sortTarget: SortOption = sortOption) => {
+    async (
+      sortTarget: SortOption = sortOption,
+      {
+        silent = false,
+        isRetry = false,
+      }: { silent?: boolean; isRetry?: boolean } = {}
+    ) => {
       if (!user) return;
 
       const currentFetchId = ++fetchIdRef.current;
-      console.log(`[Marketplace] attempt #${currentFetchId}: loading (sort: ${sortTarget})`);
-      setFetchStatus('loading-first');
-      lastDocRef.current = null;
-      hasMoreRef.current = true;
+      console.log(
+        `[Marketplace] attempt #${currentFetchId} (silent: ${silent}, isRetry: ${isRetry}): loading (sort: ${sortTarget})`
+      );
 
-      // Bersihkan timer sebelumnya jika ada
+      if (!silent) {
+        setFetchStatus('loading-first');
+        lastDocRef.current = null;
+        hasMoreRef.current = true;
+      }
+
+      // Bersihkan timer timeout sebelumnya jika ada
       if (activeTimerRef.current) {
         clearTimeout(activeTimerRef.current);
         activeTimerRef.current = null;
@@ -179,12 +194,19 @@ export default function MarketplaceScreen() {
       // Timeout 10 detik eksplisit
       activeTimerRef.current = setTimeout(() => {
         if (fetchIdRef.current === currentFetchId) {
-          console.log(`[Marketplace] attempt #${currentFetchId}: timeout 10s triggered -> error`);
+          console.log(
+            `[Marketplace] attempt #${currentFetchId}: timeout 10s triggered -> error`
+          );
           setFetchStatus('error-first');
         }
       }, FETCH_TIMEOUT_MS);
 
       try {
+        // Reset koneksi & backoff Firestore HANYA jika diminta (retry/pull-to-refresh/auto-reconnect)
+        if (isRetry) {
+          await forceFirestoreReconnect();
+        }
+
         const col = collection(db, 'marketplace_products');
         const q = firestoreQuery(
           col,
@@ -195,8 +217,7 @@ export default function MarketplaceScreen() {
         // getDocsFromServer: TIDAK membaca cache, langsung ke server
         const snap = await getDocsFromServer(q);
 
-        // Jika request lama berhasil SETELAH error tampil atau saat masih menunggu:
-        // Otomatis ganti error / skeleton dengan data
+        // Jika request berhasil (bahkan jika sebelumnya sudah berstatus error)
         if (fetchIdRef.current === currentFetchId) {
           if (activeTimerRef.current) {
             clearTimeout(activeTimerRef.current);
@@ -224,8 +245,15 @@ export default function MarketplaceScreen() {
             clearTimeout(activeTimerRef.current);
             activeTimerRef.current = null;
           }
-          console.log(`[Marketplace] attempt #${currentFetchId}: error`, err);
-          setFetchStatus('error-first');
+          console.log(
+            `[Marketplace] attempt #${currentFetchId}: error (code: ${
+              (err as any)?.code || 'unknown'
+            })`,
+            err
+          );
+          if (!silent) {
+            setFetchStatus('error-first');
+          }
         }
       }
     },
@@ -249,7 +277,6 @@ export default function MarketplaceScreen() {
         startAfter(lastDocRef.current),
         limit(PAGE_SIZE)
       );
-      // Load more juga menggunakan getDocsFromServer
       const snap = await getDocsFromServer(q);
       console.log(
         `[Marketplace LoadMore] success, docs: ${snap.docs.length}, fromCache: ${snap.metadata.fromCache}`
@@ -271,15 +298,66 @@ export default function MarketplaceScreen() {
     }
   }, [user, fetchStatus, sortOption]);
 
-  // ─── Tombol Coba Lagi / Reconnect Handler ─────────────────────────
+  // ─── Tombol Coba Lagi (Non-silent: Skeleton + Reset Timer) ─────────
   const handleRetry = useCallback(async () => {
-    await forceFirestoreReconnect();
-    fetchFirstPage(sortOption);
+    silentRetryCountRef.current = 0;
+    await fetchFirstPage(sortOption, { silent: false, isRetry: true });
   }, [fetchFirstPage, sortOption]);
 
-  // ─── Pemulihan otomatis saat koneksi kembali ──────────────────────
+  // ─── Percobaan Ulang Diam-diam (Silent Retry Interval saat Error) ──
+  useEffect(() => {
+    if (fetchStatus !== 'error-first') {
+      if (silentRetryTimerRef.current) {
+        clearInterval(silentRetryTimerRef.current);
+        silentRetryTimerRef.current = null;
+      }
+      silentRetryCountRef.current = 0;
+      return;
+    }
+
+    silentRetryCountRef.current = 0;
+
+    silentRetryTimerRef.current = setInterval(async () => {
+      if (silentRetryCountRef.current >= MAX_SILENT_RETRIES) {
+        console.log(
+          `[Marketplace] Max silent retries (${MAX_SILENT_RETRIES}) reached. Stopping retry interval.`
+        );
+        if (silentRetryTimerRef.current) {
+          clearInterval(silentRetryTimerRef.current);
+          silentRetryTimerRef.current = null;
+        }
+        return;
+      }
+
+      const isOnline = await checkIsDeviceOnline();
+      if (isOnline) {
+        silentRetryCountRef.current += 1;
+        console.log(
+          `[Marketplace] Silent retry #${silentRetryCountRef.current}/${MAX_SILENT_RETRIES} triggered (online detected)`
+        );
+        fetchFirstPage(sortOption, { silent: true, isRetry: true });
+      } else {
+        console.log('[Marketplace] Silent retry skipped (device is offline)');
+      }
+    }, SILENT_RETRY_INTERVAL_MS);
+
+    return () => {
+      if (silentRetryTimerRef.current) {
+        clearInterval(silentRetryTimerRef.current);
+        silentRetryTimerRef.current = null;
+      }
+    };
+  }, [fetchStatus, fetchFirstPage, sortOption]);
+
+  // ─── Pemulihan otomatis saat event 'online' terdeteksi ─────────────
+  const handleAutoReconnect = useCallback(() => {
+    console.log('[Marketplace] AutoReconnect event triggered: starting silent retry cycle');
+    silentRetryCountRef.current = 0;
+    fetchFirstPage(sortOption, { silent: true, isRetry: true });
+  }, [fetchFirstPage, sortOption]);
+
   useAutoReconnect(
-    handleRetry,
+    handleAutoReconnect,
     fetchStatus === 'loading-first' || fetchStatus === 'error-first'
   );
 
@@ -290,8 +368,7 @@ export default function MarketplaceScreen() {
     setProducts([]);
     lastDocRef.current = null;
     setFetchStatus('loading-first');
-    await forceFirestoreReconnect();
-    await fetchFirstPage(sortOption);
+    await fetchFirstPage(sortOption, { silent: false, isRetry: true });
     setIsRefreshing(false);
   }, [fetchFirstPage, sortOption]);
 
@@ -301,18 +378,21 @@ export default function MarketplaceScreen() {
       if (newSort === sortOption) return;
       setSortOption(newSort);
       setProducts([]); // Kosongkan data agar skeleton tampil
-      fetchFirstPage(newSort);
+      fetchFirstPage(newSort, { silent: false });
     },
     [sortOption, fetchFirstPage]
   );
 
   // ─── Inisialisasi awal (Hanya fetch saat layar aktif) ──────────────
   useEffect(() => {
-    fetchFirstPage(sortOption);
+    fetchFirstPage(sortOption, { silent: false });
 
     return () => {
       if (activeTimerRef.current) {
         clearTimeout(activeTimerRef.current);
+      }
+      if (silentRetryTimerRef.current) {
+        clearInterval(silentRetryTimerRef.current);
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -396,9 +476,8 @@ export default function MarketplaceScreen() {
         )}
       </View>
 
-      {/* Chip Urutan */}
+      {/* Chip Urutan (Tanpa teks "Urutkan") */}
       <View style={styles.sortRow}>
-        <Text style={[styles.sortLabel, { color: theme.muted }]}>Urutkan:</Text>
         <FlatList
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -790,17 +869,12 @@ const styles = StyleSheet.create({
   sortRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
     marginBottom: 14,
   },
-  sortLabel: {
-    fontFamily: FontNames.sansMedium,
-    fontSize: 13,
-  },
-  sortContent: { gap: 6 },
+  sortContent: { gap: 8 },
   sortChip: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
     borderRadius: 20,
     borderWidth: 1,
   },

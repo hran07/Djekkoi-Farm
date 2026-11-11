@@ -71,3 +71,20 @@ export interface MarketplaceProduct extends Fish {
   updatedAt?: string;
 }
 
+export interface Conversation {
+  id: string;
+  participants: [string, string];
+  productId: string;
+  productName: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  createdAt: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  senderId: string;
+  text: string;
+  createdAt: string;
+}
+
