@@ -88,3 +88,14 @@ export interface ChatMessage {
   createdAt: string;
 }
 
+export type TodoPeriod = 'harian' | 'mingguan';
+
+export interface Todo {
+  id: string;
+  title: string;
+  period: TodoPeriod;
+  lastCompletedKey: string | null;
+  createdAt: string; // ISO
+}
+
+

@@ -10,6 +10,7 @@ import {
   Alert,
   RefreshControl,
 } from 'react-native';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
 import { useTheme } from '@/hooks/useTheme';
@@ -17,10 +18,11 @@ import { useAppTheme } from '@/context/ThemeContext';
 import { FontNames } from '@/constants/theme';
 import { useAuth } from '@/context/AuthContext';
 import { useStore } from '@/context/StoreContext';
-import { db } from '@/lib/firebase';
+import { useTodos } from '@/hooks/useTodos';
+import { isTodoDone } from '@/lib/todoPeriod';
+import { auth, db } from '@/lib/firebase';
 import { doc, updateDoc } from 'firebase/firestore';
 import { updateProfile } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
 import { Chip } from '@/components/Chip';
 import { HistoryItem } from '@/components/HistoryItem';
 import { EmptyState } from '@/components/EmptyState';
@@ -49,17 +51,35 @@ function Divider() {
 // ──────────────────────────────────────────────
 export default function AccountScreen() {
   const theme = useTheme();
+  const router = useRouter();
   const { isDark, setDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { user, profile, logout } = useAuth();
   const { state, historyFilter, setHistoryFilter, refresh } = useStore();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
+  const { todos, status: todoStatus, reload: reloadTodos } = useTodos(user?.uid);
+
+  useFocusEffect(
+    useCallback(() => {
+      reloadTodos();
+    }, [reloadTodos])
+  );
+
+  const totalTodos = todos.length;
+  const completedTodos = todos.filter((t) => isTodoDone(t)).length;
+  const todoSummary =
+    todoStatus === 'loading' && totalTodos === 0
+      ? 'Memuat...'
+      : totalTodos > 0
+      ? `${completedTodos} dari ${totalTodos} selesai`
+      : 'Belum ada aktivitas';
+
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await refresh();
+    await Promise.all([refresh(), reloadTodos()]);
     setIsRefreshing(false);
-  }, [refresh]);
+  }, [refresh, reloadTodos]);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.name ?? '');
@@ -243,6 +263,50 @@ export default function AccountScreen() {
               {profile?.email ?? user?.email ?? '—'}
             </Text>
           </View>
+
+          <Divider />
+
+          {/* Todo List Perawatan */}
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => router.push('/todo' as any)}
+            accessibilityRole="button"
+            accessibilityLabel={`Todo List, ${todoSummary}`}
+          >
+            <View style={styles.rowLeft}>
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={theme.accent}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <Path d="M9 11l3 3L22 4" />
+                <Path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" />
+              </Svg>
+              <View>
+                <Text style={[styles.rowLabel, { color: theme.ink }]}>Todo List</Text>
+                <Text style={[styles.rowSub, { color: theme.muted }]}>
+                  {todoSummary}
+                </Text>
+              </View>
+            </View>
+            <Svg
+              width={18}
+              height={18}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={theme.muted}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <Path d="M9 18l6-6-6-6" />
+            </Svg>
+          </TouchableOpacity>
         </SectionCard>
 
         {/* ── TAMPILAN ─── */}
