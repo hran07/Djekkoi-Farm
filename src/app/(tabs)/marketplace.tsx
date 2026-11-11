@@ -1,21 +1,9 @@
-import { Badge, BadgeType } from '@/components/Badge';
-import { Button } from '@/components/Button';
-import { Chip } from '@/components/Chip';
-import { KoiArt } from '@/components/KoiArt';
-import { FontNames } from '@/constants/theme';
-import { useAuth } from '@/context/AuthContext';
-import { useStore } from '@/context/StoreContext';
-import { useNetwork } from '@/hooks/useNetwork';
-import { useTheme } from '@/hooks/useTheme';
-import { rp, sum } from '@/lib/format';
-import { Fish } from '@/lib/types';
-import { useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  FlatList,
   Image,
   RefreshControl,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -23,89 +11,339 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Line, Path } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
+import { Badge, BadgeType } from '@/components/Badge';
+import { Button } from '@/components/Button';
+import { KoiArt } from '@/components/KoiArt';
+import { Skeleton } from '@/components/Skeleton';
+import { FontNames } from '@/constants/theme';
+import { useAuth } from '@/context/AuthContext';
+import { useStore } from '@/context/StoreContext';
+import { useTheme } from '@/hooks/useTheme';
+import { db, forceFirestoreReconnect } from '@/lib/firebase';
+import { useAutoReconnect } from '@/hooks/useAutoReconnect';
+import { rp } from '@/lib/format';
+import { MarketplaceProduct } from '@/lib/types';
+import {
+  collection,
+  getDocsFromServer,
+  limit,
+  orderBy,
+  query as firestoreQuery,
+  QueryDocumentSnapshot,
+  startAfter,
+} from 'firebase/firestore';
 
 type SortOption = 'newest' | 'price_asc' | 'price_desc' | 'size_desc';
+
+const PAGE_SIZE = 10;
+const FETCH_TIMEOUT_MS = 10000;
+
+function parseProduct(docSnap: QueryDocumentSnapshot): MarketplaceProduct {
+  const d = docSnap.data();
+  return {
+    id: docSnap.id,
+    userId: d.userId,
+    sellerName: d.sellerName || 'Peternak Djekkoi',
+    sellerEmail: d.sellerEmail || '',
+    varietas: d.varietas || '',
+    asal: d.asal || '',
+    jumlah: Number(d.jumlah) || 1,
+    ukuran: Number(d.ukuran) || 0,
+    grade: d.grade || 'A',
+    kelamin: d.kelamin || 'Belum diketahui',
+    kondisi: d.kondisi || 'Sehat',
+    hargaBeli: Number(d.hargaBeli) || 0,
+    hargaJual: Number(d.hargaJual) || 0,
+    kolamId: d.kolamId || '',
+    kolamName: d.kolamName || '',
+    catatan: d.catatan || '',
+    display: true,
+    foto: d.foto || null,
+    tgl: d.tgl || new Date().toISOString(),
+    updatedAt: d.updatedAt || new Date().toISOString(),
+  };
+}
+
+function getSortConstraint(sort: SortOption) {
+  switch (sort) {
+    case 'price_asc':
+      return orderBy('hargaJual', 'asc');
+    case 'price_desc':
+      return orderBy('hargaJual', 'desc');
+    case 'size_desc':
+      return orderBy('ukuran', 'desc');
+    case 'newest':
+    default:
+      return orderBy('tgl', 'desc');
+  }
+}
+
+// ── Skeleton Kartu Produk ───────────────────────────────────────────
+function ProductCardSkeleton() {
+  const theme = useTheme();
+
+  return (
+    <View
+      style={[
+        styles.productCard,
+        { backgroundColor: theme.surface, borderColor: theme.line },
+      ]}
+    >
+      {/* Gambar 16:9 */}
+      <Skeleton width="100%" height={190} borderRadius={0} />
+
+      {/* Card Body */}
+      <View style={styles.productBody}>
+        {/* Title Row */}
+        <View style={styles.productTitleRow}>
+          <Skeleton width="55%" height={22} borderRadius={6} />
+          <Skeleton width={60} height={20} borderRadius={10} />
+        </View>
+
+        {/* Specs */}
+        <Skeleton width="75%" height={14} borderRadius={4} />
+
+        {/* Kolam & Stok */}
+        <View style={styles.metaRow}>
+          <Skeleton width="40%" height={14} borderRadius={4} />
+          <Skeleton width="30%" height={14} borderRadius={4} />
+        </View>
+
+        {/* Price Box */}
+        <View
+          style={[
+            styles.priceBox,
+            { backgroundColor: theme.surface2, borderColor: theme.line },
+          ]}
+        >
+          <View style={{ gap: 4 }}>
+            <Skeleton width={80} height={11} borderRadius={4} />
+            <Skeleton width={120} height={18} borderRadius={4} />
+          </View>
+        </View>
+
+        {/* Seller Row */}
+        <View style={styles.sellerRow}>
+          <Skeleton width={50} height={12} borderRadius={4} />
+          <Skeleton width={100} height={12} borderRadius={4} />
+        </View>
+
+        {/* Action Button */}
+        <View style={styles.cardActions}>
+          <Skeleton width="100%" height={40} borderRadius={10} />
+        </View>
+      </View>
+    </View>
+  );
+}
 
 export default function MarketplaceScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { user } = useAuth();
-  const { state, openSheet, toggleDisplay, getPondName, showToast } = useStore();
-  const {
-    isOnline,
-    isChecking,
-    isSimulatedOffline,
-    toggleSimulatedOffline,
-    checkConnection,
-  } = useNetwork();
+  const { openSheet, toggleDisplay } = useStore();
 
-  const [query, setQuery] = useState('');
-  const [selectedGrade, setSelectedGrade] = useState<string>('all');
+  const [searchText, setSearchText] = useState('');
   const [sortOption, setSortOption] = useState<SortOption>('newest');
+
+  // Pagination & Loading States (Tidak disimpan di context global atau variabel modul)
+  const [products, setProducts] = useState<MarketplaceProduct[]>([]);
+  const [fetchStatus, setFetchStatus] = useState<
+    'idle' | 'loading-first' | 'loading-more' | 'done' | 'error-first'
+  >('loading-first');
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Filter hanya ikan yang terhubung ke penjualan (display === true)
-  const connectedProducts = useMemo(() => {
-    return state.fish.filter((f) => f.display === true);
-  }, [state.fish]);
+  const lastDocRef = useRef<QueryDocumentSnapshot | null>(null);
+  const hasMoreRef = useRef(true);
+  const fetchIdRef = useRef(0);
+  const activeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Statistik produk di marketplace
-  const totalItems = connectedProducts.length;
-  const totalFishCount = useMemo(
-    () => sum(connectedProducts, (f) => f.jumlah),
-    [connectedProducts]
+  // ─── Fetch First Page dengan 10 detik Timeout ─────────────────────
+  const fetchFirstPage = useCallback(
+    async (sortTarget: SortOption = sortOption) => {
+      if (!user) return;
+
+      const currentFetchId = ++fetchIdRef.current;
+      console.log(`[Marketplace] attempt #${currentFetchId}: loading (sort: ${sortTarget})`);
+      setFetchStatus('loading-first');
+      lastDocRef.current = null;
+      hasMoreRef.current = true;
+
+      // Bersihkan timer sebelumnya jika ada
+      if (activeTimerRef.current) {
+        clearTimeout(activeTimerRef.current);
+        activeTimerRef.current = null;
+      }
+
+      // Timeout 10 detik eksplisit
+      activeTimerRef.current = setTimeout(() => {
+        if (fetchIdRef.current === currentFetchId) {
+          console.log(`[Marketplace] attempt #${currentFetchId}: timeout 10s triggered -> error`);
+          setFetchStatus('error-first');
+        }
+      }, FETCH_TIMEOUT_MS);
+
+      try {
+        const col = collection(db, 'marketplace_products');
+        const q = firestoreQuery(
+          col,
+          getSortConstraint(sortTarget),
+          limit(PAGE_SIZE)
+        );
+
+        // getDocsFromServer: TIDAK membaca cache, langsung ke server
+        const snap = await getDocsFromServer(q);
+
+        // Jika request lama berhasil SETELAH error tampil atau saat masih menunggu:
+        // Otomatis ganti error / skeleton dengan data
+        if (fetchIdRef.current === currentFetchId) {
+          if (activeTimerRef.current) {
+            clearTimeout(activeTimerRef.current);
+            activeTimerRef.current = null;
+          }
+
+          console.log(
+            `[Marketplace] attempt #${currentFetchId}: success, docs: ${snap.docs.length}, fromCache: ${snap.metadata.fromCache}`
+          );
+
+          const items: MarketplaceProduct[] = [];
+          snap.forEach((docSnap) => {
+            const d = docSnap.data();
+            if (d.display !== false) items.push(parseProduct(docSnap));
+          });
+
+          lastDocRef.current = snap.docs[snap.docs.length - 1] ?? null;
+          hasMoreRef.current = snap.docs.length === PAGE_SIZE;
+          setProducts(items);
+          setFetchStatus('done');
+        }
+      } catch (err) {
+        if (fetchIdRef.current === currentFetchId) {
+          if (activeTimerRef.current) {
+            clearTimeout(activeTimerRef.current);
+            activeTimerRef.current = null;
+          }
+          console.log(`[Marketplace] attempt #${currentFetchId}: error`, err);
+          setFetchStatus('error-first');
+        }
+      }
+    },
+    [user, sortOption]
   );
-  const totalMarketValue = useMemo(
-    () => sum(connectedProducts, (f) => f.hargaJual * f.jumlah),
-    [connectedProducts]
-  );
 
-  // Filter pencarian dan grade, serta pengurutan
-  const filteredProducts = useMemo(() => {
-    let result = connectedProducts.filter((f) => {
-      const q = query.trim().toLowerCase();
-      const matchesQuery =
-        !q ||
-        `${f.varietas} ${f.asal} ${f.catatan} ${f.grade} ${getPondName(f.kolamId)}`
-          .toLowerCase()
-          .includes(q);
+  // ─── Fetch Next Page (Load More, Gagal Diam-diam) ──────────────────
+  const fetchNextPage = useCallback(async () => {
+    if (!user) return;
+    if (!hasMoreRef.current) return;
+    if (fetchStatus === 'loading-more' || fetchStatus === 'loading-first') return;
+    if (!lastDocRef.current) return;
 
-      const matchesGrade =
-        selectedGrade === 'all' ||
-        f.grade.toLowerCase() === selectedGrade.toLowerCase();
+    setFetchStatus('loading-more');
 
-      return matchesQuery && matchesGrade;
-    });
+    try {
+      const col = collection(db, 'marketplace_products');
+      const q = firestoreQuery(
+        col,
+        getSortConstraint(sortOption),
+        startAfter(lastDocRef.current),
+        limit(PAGE_SIZE)
+      );
+      // Load more juga menggunakan getDocsFromServer
+      const snap = await getDocsFromServer(q);
+      console.log(
+        `[Marketplace LoadMore] success, docs: ${snap.docs.length}, fromCache: ${snap.metadata.fromCache}`
+      );
 
-    result.sort((a, b) => {
-      if (sortOption === 'price_asc') return a.hargaJual - b.hargaJual;
-      if (sortOption === 'price_desc') return b.hargaJual - a.hargaJual;
-      if (sortOption === 'size_desc') return b.ukuran - a.ukuran;
-      // newest default
-      return new Date(b.tgl).getTime() - new Date(a.tgl).getTime();
-    });
+      const items: MarketplaceProduct[] = [];
+      snap.forEach((docSnap) => {
+        const d = docSnap.data();
+        if (d.display !== false) items.push(parseProduct(docSnap));
+      });
 
-    return result;
-  }, [connectedProducts, query, selectedGrade, sortOption, getPondName]);
-
-  const handleManualCheckConnection = async () => {
-    const online = await checkConnection();
-    if (online) {
-      showToast('Koneksi internet aktif! Marketplace siap diakses.');
-    } else {
-      showToast('Belum ada koneksi internet. Periksa Wi-Fi atau data seluler Anda.');
+      lastDocRef.current = snap.docs[snap.docs.length - 1] ?? lastDocRef.current;
+      hasMoreRef.current = snap.docs.length === PAGE_SIZE;
+      setProducts((prev) => [...prev, ...items]);
+      setFetchStatus('done');
+    } catch {
+      // Gagal diam-diam, tanpa pesan offline, tanpa loop retry
+      setFetchStatus('done');
     }
-  };
+  }, [user, fetchStatus, sortOption]);
 
+  // ─── Tombol Coba Lagi / Reconnect Handler ─────────────────────────
+  const handleRetry = useCallback(async () => {
+    await forceFirestoreReconnect();
+    fetchFirstPage(sortOption);
+  }, [fetchFirstPage, sortOption]);
+
+  // ─── Pemulihan otomatis saat koneksi kembali ──────────────────────
+  useAutoReconnect(
+    handleRetry,
+    fetchStatus === 'loading-first' || fetchStatus === 'error-first'
+  );
+
+  // ─── Pull-to-refresh ──────────────────────────────────────────────
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
-    await checkConnection();
-    setTimeout(() => {
-      setIsRefreshing(false);
-    }, 600);
-  }, [checkConnection]);
+    // Kosongkan segera agar tidak menampilkan data lama saat offline
+    setProducts([]);
+    lastDocRef.current = null;
+    setFetchStatus('loading-first');
+    await forceFirestoreReconnect();
+    await fetchFirstPage(sortOption);
+    setIsRefreshing(false);
+  }, [fetchFirstPage, sortOption]);
+
+  // ─── Ganti Urutan (Server-Side Ordering) ──────────────────────────
+  const handleSelectSort = useCallback(
+    (newSort: SortOption) => {
+      if (newSort === sortOption) return;
+      setSortOption(newSort);
+      setProducts([]); // Kosongkan data agar skeleton tampil
+      fetchFirstPage(newSort);
+    },
+    [sortOption, fetchFirstPage]
+  );
+
+  // ─── Inisialisasi awal (Hanya fetch saat layar aktif) ──────────────
+  useEffect(() => {
+    fetchFirstPage(sortOption);
+
+    return () => {
+      if (activeTimerRef.current) {
+        clearTimeout(activeTimerRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user]);
+
+  // ─── Filter Search di Sisi Klien ─────────────────────────────────
+  const filteredProducts = useMemo(() => {
+    const q = searchText.trim().toLowerCase();
+    if (!q) return products;
+
+    return products.filter((p) => {
+      return (
+        `${p.varietas} ${p.asal} ${p.catatan} ${p.grade} ${p.kolamName} ${p.sellerName}`
+          .toLowerCase()
+          .includes(q)
+      );
+    });
+  }, [products, searchText]);
+
+  // Jika hasil filter search kosong tapi masih ada halaman berikutnya di server,
+  // otomatis muat halaman berikutnya agar hasil pencarian dapat ditemukan
+  useEffect(() => {
+    if (
+      searchText.trim() &&
+      filteredProducts.length === 0 &&
+      hasMoreRef.current &&
+      fetchStatus === 'done'
+    ) {
+      fetchNextPage();
+    }
+  }, [searchText, filteredProducts.length, fetchStatus, fetchNextPage]);
 
   const getConditionBadgeType = (kondisi: string): BadgeType => {
     if (kondisi === 'Sehat') return 'ok';
@@ -113,132 +351,386 @@ export default function MarketplaceScreen() {
     return 'warn';
   };
 
-  // ──────────────────────────────────────────────
-  // TAMPILAN OFFLINE (Blokir akses saat offline)
-  // ──────────────────────────────────────────────
-  if (!isOnline) {
-    return (
-      <View style={[styles.container, { backgroundColor: theme.bg }]}>
-        <ScrollView
-          contentContainerStyle={[
-            styles.offlineContent,
-            {
-              paddingTop: Math.max(insets.top, 24) + 20,
-              paddingBottom: 100 + Math.max(insets.bottom, 12),
-            },
-          ]}
-          showsVerticalScrollIndicator={false}
+  // ─── Header FlatList ──────────────────────────────────────────────
+  const ListHeader = (
+    <View>
+      {/* Top Header */}
+      <View style={styles.headerRow}>
+        <View style={{ flex: 1 }}>
+          <Text style={[styles.title, { color: theme.ink }]}>Marketplace</Text>
+          <Text style={[styles.sub, { color: theme.muted }]}>
+            Semua ikan yang sedang dijual oleh para peternak.
+          </Text>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <View
+        style={[
+          styles.searchWrap,
+          { backgroundColor: theme.surface, borderColor: theme.line },
+        ]}
+      >
+        <Svg
+          width={18}
+          height={18}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={theme.muted}
+          strokeWidth={2}
+          strokeLinecap="round"
         >
-          {/* Offline Illustration Card */}
-          <View
-            style={[
-              styles.offlineCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <View style={[styles.offlineIconWrap, { backgroundColor: theme.badSoft }]}>
-              <Svg width={44} height={44} viewBox="0 0 24 24" fill="none">
-                <Path
-                  d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.58 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"
-                  stroke={theme.bad}
-                  strokeWidth={2.2}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </Svg>
-            </View>
+          <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </Svg>
+        <TextInput
+          style={[styles.searchInput, { color: theme.ink }]}
+          value={searchText}
+          onChangeText={setSearchText}
+          placeholder="Cari varietas, peternak, asal..."
+          placeholderTextColor={theme.muted}
+        />
+        {Boolean(searchText) && (
+          <TouchableOpacity onPress={() => setSearchText('')} hitSlop={10}>
+            <Text style={{ color: theme.muted, fontSize: 16 }}>✕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
 
-            <View style={[styles.offlineBadge, { backgroundColor: theme.badSoft }]}>
-              <View style={[styles.pulseDot, { backgroundColor: theme.bad }]} />
-              <Text style={[styles.offlineBadgeText, { color: theme.bad }]}>
-                Aplikasi Offline
-              </Text>
-            </View>
-
-            <Text style={[styles.offlineTitle, { color: theme.ink }]}>
-              Akses Marketplace Terputus
-            </Text>
-
-            <Text style={[styles.offlineDesc, { color: theme.muted }]}>
-              Fitur Marketplace membutuhkan koneksi internet aktif untuk melihat,
-              menghubungkan, dan menyinkronkan produk ikan koi yang Anda jual.
-            </Text>
-
-            {isSimulatedOffline && (
-              <View
+      {/* Chip Urutan */}
+      <View style={styles.sortRow}>
+        <Text style={[styles.sortLabel, { color: theme.muted }]}>Urutkan:</Text>
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.sortContent}
+          data={[
+            { key: 'newest', label: 'Terbaru' },
+            { key: 'price_asc', label: 'Harga Terendah' },
+            { key: 'price_desc', label: 'Harga Tertinggi' },
+            { key: 'size_desc', label: 'Ukuran Terbesar' },
+          ] as { key: SortOption; label: string }[]}
+          keyExtractor={(item) => item.key}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[
+                styles.sortChip,
+                sortOption === item.key && {
+                  backgroundColor: theme.accentSoft,
+                  borderColor: theme.accent,
+                },
+                { borderColor: theme.line },
+              ]}
+              onPress={() => handleSelectSort(item.key)}
+            >
+              <Text
                 style={[
-                  styles.simulatedBox,
-                  { backgroundColor: theme.goldSoft, borderColor: theme.gold },
+                  styles.sortChipText,
+                  {
+                    color:
+                      sortOption === item.key ? theme.accent : theme.muted,
+                  },
                 ]}
               >
-                <Text style={[styles.simulatedText, { color: theme.gold }]}>
-                  ⚠️ Mode Uji: Simulasi Offline Aktif
-                </Text>
-              </View>
-            )}
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+      </View>
+    </View>
+  );
 
-            <View style={styles.offlineActionCol}>
-              <Button
-                variant="pri"
-                wide
-                onPress={handleManualCheckConnection}
-                disabled={isChecking}
-              >
-                {isChecking ? (
-                  <View style={styles.checkingRow}>
-                    <ActivityIndicator size="small" color={theme.onAccent} />
-                    <Text style={[styles.checkingText, { color: theme.onAccent }]}>
-                      Memeriksa koneksi...
-                    </Text>
-                  </View>
-                ) : (
-                  'Periksa Koneksi Internet'
-                )}
-              </Button>
+  // ─── Render Item Produk ───────────────────────────────────────────
+  const renderItem = ({ item: product }: { item: MarketplaceProduct }) => {
+    const isOwner = product.userId === user?.uid;
+    return (
+      <View
+        style={[
+          styles.productCard,
+          { backgroundColor: theme.surface, borderColor: theme.line },
+        ]}
+      >
+        {/* Gambar Produk */}
+        <View
+          style={[styles.productImageWrap, { backgroundColor: theme.surface2 }]}
+        >
+          {product.foto ? (
+            <Image
+              source={{ uri: product.foto }}
+              style={styles.productImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <KoiArt varietas={product.varietas} style={styles.productImage} />
+          )}
 
-              <Button
-                variant={isSimulatedOffline ? 'red' : 'default'}
-                wide
-                onPress={toggleSimulatedOffline}
-              >
-                {isSimulatedOffline ? 'Matikan Simulasi Offline' : 'Uji Simulasi Offline'}
-              </Button>
+          {/* Overlays */}
+          <View style={styles.imgTagRow}>
+            <View
+              style={[
+                styles.gradeTag,
+                { backgroundColor: 'rgba(0, 0, 0, 0.72)' },
+              ]}
+            >
+              <Text style={styles.gradeTagText}>Grade {product.grade}</Text>
+            </View>
+            <View
+              style={[
+                styles.mktLiveTag,
+                { backgroundColor: 'rgba(23, 163, 74, 0.88)' },
+              ]}
+            >
+              <View style={styles.liveDot} />
+              <Text style={styles.mktLiveText}>Dijual</Text>
             </View>
           </View>
+        </View>
 
-          {/* Edukasi Tambahan */}
+        {/* Card Body */}
+        <View style={styles.productBody}>
+          {/* Title & Condition */}
+          <View style={styles.productTitleRow}>
+            <Text
+              style={[styles.productTitle, { color: theme.ink }]}
+              numberOfLines={1}
+            >
+              {product.varietas}
+            </Text>
+            <Badge
+              label={product.kondisi}
+              type={getConditionBadgeType(product.kondisi)}
+            />
+          </View>
+
+          {/* Specs */}
+          <Text style={[styles.productSpecs, { color: theme.muted }]}>
+            {product.ukuran} cm • {product.kelamin} • {product.asal || 'Lokal'}
+          </Text>
+
+          {/* Kolam & Stok */}
+          <View style={styles.metaRow}>
+            <Text style={[styles.metaPond, { color: theme.ink }]}>
+              📍 {product.kolamName || '-'}
+            </Text>
+            <Text style={[styles.metaStock, { color: theme.accent }]}>
+              {product.jumlah} ekor tersedia
+            </Text>
+          </View>
+
+          {/* Price Box */}
           <View
             style={[
-              styles.infoCard,
+              styles.priceBox,
               { backgroundColor: theme.surface2, borderColor: theme.line },
             ]}
           >
-            <Text style={[styles.infoTitle, { color: theme.ink }]}>
-              Mengapa Marketplace butuh internet?
+            <View>
+              <Text style={[styles.priceSub, { color: theme.muted }]}>
+                Harga Penjualan
+              </Text>
+              <Text style={[styles.priceMain, { color: theme.red }]}>
+                {rp(product.hargaJual)}
+                <Text style={[styles.pricePer, { color: theme.muted }]}>
+                  {' '}
+                  / ekor
+                </Text>
+              </Text>
+            </View>
+            {product.jumlah > 1 && (
+              <Text style={[styles.priceTotal, { color: theme.muted }]}>
+                Total: {rp(product.hargaJual * product.jumlah)}
+              </Text>
+            )}
+          </View>
+
+          {/* Peternak */}
+          <View style={styles.sellerRow}>
+            <Text style={[styles.sellerLabel, { color: theme.muted }]}>
+              Peternak:
             </Text>
-            <Text style={[styles.infoText, { color: theme.muted }]}>
-              • Sinkronisasi katalog ikan real-time ke pembeli.{'\n'}
-              • Pembaruan harga dan ketersediaan stok ikan.{'\n'}
-              • Transaksi aman dan verifikasi identitas farm.
+            <Text
+              style={[styles.sellerName, { color: theme.ink }]}
+              numberOfLines={1}
+            >
+              {product.sellerName || 'Djekkoi Farm'}
+              {isOwner ? ' (Anda)' : ''}
             </Text>
           </View>
-        </ScrollView>
+
+          {/* Action Buttons */}
+          <View style={styles.cardActions}>
+            <Button
+              variant="pri"
+              style={styles.detailBtn}
+              onPress={() => openSheet('fishDetail', product)}
+            >
+              Lihat Detail
+            </Button>
+            {isOwner && (
+              <Button
+                variant="ghost"
+                style={styles.disconnectBtn}
+                onPress={() => toggleDisplay(product.id)}
+              >
+                Batal Jual
+              </Button>
+            )}
+          </View>
+        </View>
       </View>
     );
-  }
+  };
 
-  // ──────────────────────────────────────────────
-  // TAMPILAN ONLINE (Marketplace Aktif)
-  // ──────────────────────────────────────────────
+  // ─── Empty & Error State ──────────────────────────────────────────
+  const renderEmptyOrError = () => {
+    // 1. Loading first page: Tampilkan 3 kartu Skeleton
+    if (fetchStatus === 'loading-first') {
+      return (
+        <View style={styles.skeletonContainer}>
+          <ProductCardSkeleton />
+          <ProductCardSkeleton />
+          <ProductCardSkeleton />
+        </View>
+      );
+    }
+
+    // 2. Error setelah 10 detik atau offline
+    if (fetchStatus === 'error-first') {
+      return (
+        <View
+          style={[
+            styles.emptyCard,
+            { backgroundColor: theme.surface, borderColor: theme.line },
+          ]}
+        >
+          <View
+            style={[styles.emptyIconWrap, { backgroundColor: theme.surface2 }]}
+          >
+            <Svg
+              width={36}
+              height={36}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={theme.muted}
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <Path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+              <Path d="M12 8v4M12 16h.01" />
+            </Svg>
+          </View>
+          <Text style={[styles.emptyTitle, { color: theme.ink }]}>
+            Koneksi bermasalah
+          </Text>
+          <Text style={[styles.emptyDesc, { color: theme.muted }]}>
+            Tidak dapat mengambil data marketplace. Periksa koneksi Anda, lalu
+            coba lagi.
+          </Text>
+          <View style={styles.emptyActions}>
+            <Button variant="pri" wide onPress={handleRetry}>
+              Coba Lagi
+            </Button>
+          </View>
+        </View>
+      );
+    }
+
+    // 3. Query berhasil tapi koleksi memang kosong
+    if (products.length === 0) {
+      return (
+        <View
+          style={[
+            styles.emptyCard,
+            { backgroundColor: theme.surface, borderColor: theme.line },
+          ]}
+        >
+          <View
+            style={[styles.emptyIconWrap, { backgroundColor: theme.accentSoft }]}
+          >
+            <Svg
+              width={36}
+              height={36}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={theme.accent}
+              strokeWidth={1.8}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <Path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+              <Path d="M3 6h18" />
+              <Path d="M16 10a4 4 0 01-8 0" />
+            </Svg>
+          </View>
+          <Text style={[styles.emptyTitle, { color: theme.ink }]}>
+            Belum Ada Ikan di Marketplace
+          </Text>
+          <Text style={[styles.emptyDesc, { color: theme.muted }]}>
+            Belum ada peternak yang menampilkan ikan untuk dijual saat ini.
+          </Text>
+        </View>
+      );
+    }
+
+    // 4. Filter search tidak ada yang cocok (hanya jika sudah tidak ada halaman lagi untuk dicoba)
+    if (!hasMoreRef.current && searchText.trim() !== '') {
+      return (
+        <View
+          style={[
+            styles.emptyCard,
+            { backgroundColor: theme.surface, borderColor: theme.line },
+          ]}
+        >
+          <Text style={[styles.emptyTitle, { color: theme.ink }]}>
+            Tidak ada ikan yang cocok
+          </Text>
+          <Text style={[styles.emptyDesc, { color: theme.muted }]}>
+            Tidak ditemukan ikan dengan kata kunci "{searchText}".
+          </Text>
+          <Button variant="default" onPress={() => setSearchText('')}>
+            Reset Filter
+          </Button>
+        </View>
+      );
+    }
+
+    return null;
+  };
+
+  // ─── Footer FlatList ──────────────────────────────────────────────
+  const ListFooter =
+    fetchStatus === 'loading-more' ? (
+      <View style={styles.loadMoreSpinner}>
+        <ActivityIndicator size="small" color={theme.muted} />
+      </View>
+    ) : undefined;
+
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
-      <ScrollView
+      <FlatList
+        data={fetchStatus === 'loading-first' ? [] : filteredProducts}
+        keyExtractor={(item) => item.id}
+        renderItem={renderItem}
+        ListHeaderComponent={ListHeader}
+        ListEmptyComponent={renderEmptyOrError}
+        ListFooterComponent={ListFooter}
         contentContainerStyle={[
           styles.content,
           { paddingBottom: 110 + Math.max(insets.bottom, 12) },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        onEndReached={() => {
+          if (
+            !isRefreshing &&
+            fetchStatus === 'done' &&
+            hasMoreRef.current
+          ) {
+            fetchNextPage();
+          }
+        }}
+        onEndReachedThreshold={0.4}
         refreshControl={
           <RefreshControl
             refreshing={isRefreshing}
@@ -246,481 +738,8 @@ export default function MarketplaceScreen() {
             tintColor={theme.accent}
           />
         }
-      >
-        {/* ── Top Header ─── */}
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.title, { color: theme.ink }]}>Marketplace</Text>
-            <Text style={[styles.sub, { color: theme.muted }]}>
-              Ikan aktif yang dipilih untuk dijual dari farm Anda.
-            </Text>
-          </View>
-
-          {/* Status Online Pill */}
-          <View
-            style={[
-              styles.onlinePill,
-              { backgroundColor: theme.okSoft, borderColor: theme.ok },
-            ]}
-          >
-            <View style={[styles.pulseDot, { backgroundColor: theme.ok }]} />
-            <Text style={[styles.onlinePillText, { color: theme.ok }]}>Online</Text>
-          </View>
-        </View>
-
-        {/* ── Quick Simulator Toggle Strip ─── */}
-        <View
-          style={[
-            styles.simStrip,
-            { backgroundColor: theme.surface2, borderColor: theme.line },
-          ]}
-        >
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.simStripTitle, { color: theme.ink }]}>
-              Koneksi Internet: Aktif
-            </Text>
-            <Text style={[styles.simStripSub, { color: theme.muted }]}>
-              Anda dapat menguji respon offline kapan saja.
-            </Text>
-          </View>
-          <TouchableOpacity
-            style={[
-              styles.simToggleBtn,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-            onPress={toggleSimulatedOffline}
-            accessibilityRole="button"
-            accessibilityLabel="Uji mode offline"
-          >
-            <Text style={[styles.simToggleText, { color: theme.accent }]}>
-              Tes Offline
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* ── KPI Stats Cards ─── */}
-        <View style={styles.statsRow}>
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <Text style={[styles.statValue, { color: theme.accent }]}>
-              {totalItems}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.muted }]}>
-              Jenis Dijual
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <Text style={[styles.statValue, { color: theme.ink }]}>
-              {totalFishCount}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.muted }]}>
-              Total Ekor
-            </Text>
-          </View>
-
-          <View
-            style={[
-              styles.statCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <Text
-              style={[styles.statValue, { color: theme.red, fontSize: 15 }]}
-              numberOfLines={1}
-            >
-              {rp(totalMarketValue)}
-            </Text>
-            <Text style={[styles.statLabel, { color: theme.muted }]}>
-              Total Nilai
-            </Text>
-          </View>
-        </View>
-
-        {/* ── Search Bar ─── */}
-        <View
-          style={[
-            styles.searchWrap,
-            { backgroundColor: theme.surface, borderColor: theme.line },
-          ]}
-        >
-          <Svg
-            width={18}
-            height={18}
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke={theme.muted}
-            strokeWidth={2}
-            strokeLinecap="round"
-          >
-            <Path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </Svg>
-          <TextInput
-            style={[styles.searchInput, { color: theme.ink }]}
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Cari varietas, asal, catatan..."
-            placeholderTextColor={theme.muted}
-          />
-          {Boolean(query) && (
-            <TouchableOpacity onPress={() => setQuery('')} hitSlop={10}>
-              <Text style={{ color: theme.muted, fontSize: 16 }}>✕</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* ── Filter Chips ─── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.filterScroll}
-          contentContainerStyle={styles.filterContent}
-        >
-          <Chip
-            label="Semua Grade"
-            active={selectedGrade === 'all'}
-            onPress={() => setSelectedGrade('all')}
-          />
-          <Chip
-            label="Grade A"
-            active={selectedGrade === 'A'}
-            onPress={() => setSelectedGrade('A')}
-          />
-          <Chip
-            label="Grade B"
-            active={selectedGrade === 'B'}
-            onPress={() => setSelectedGrade('B')}
-          />
-          <Chip
-            label="Grade Show"
-            active={selectedGrade === 'Show'}
-            onPress={() => setSelectedGrade('Show')}
-          />
-        </ScrollView>
-
-        {/* ── Sort Chips ─── */}
-        <View style={styles.sortRow}>
-          <Text style={[styles.sortLabel, { color: theme.muted }]}>Urutkan:</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.sortContent}
-          >
-            <TouchableOpacity
-              style={[
-                styles.sortChip,
-                sortOption === 'newest' && {
-                  backgroundColor: theme.accentSoft,
-                  borderColor: theme.accent,
-                },
-                { borderColor: theme.line },
-              ]}
-              onPress={() => setSortOption('newest')}
-            >
-              <Text
-                style={[
-                  styles.sortChipText,
-                  { color: sortOption === 'newest' ? theme.accent : theme.muted },
-                ]}
-              >
-                Terbaru
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.sortChip,
-                sortOption === 'price_asc' && {
-                  backgroundColor: theme.accentSoft,
-                  borderColor: theme.accent,
-                },
-                { borderColor: theme.line },
-              ]}
-              onPress={() => setSortOption('price_asc')}
-            >
-              <Text
-                style={[
-                  styles.sortChipText,
-                  { color: sortOption === 'price_asc' ? theme.accent : theme.muted },
-                ]}
-              >
-                Harga Terendah
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.sortChip,
-                sortOption === 'price_desc' && {
-                  backgroundColor: theme.accentSoft,
-                  borderColor: theme.accent,
-                },
-                { borderColor: theme.line },
-              ]}
-              onPress={() => setSortOption('price_desc')}
-            >
-              <Text
-                style={[
-                  styles.sortChipText,
-                  { color: sortOption === 'price_desc' ? theme.accent : theme.muted },
-                ]}
-              >
-                Harga Tertinggi
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.sortChip,
-                sortOption === 'size_desc' && {
-                  backgroundColor: theme.accentSoft,
-                  borderColor: theme.accent,
-                },
-                { borderColor: theme.line },
-              ]}
-              onPress={() => setSortOption('size_desc')}
-            >
-              <Text
-                style={[
-                  styles.sortChipText,
-                  { color: sortOption === 'size_desc' ? theme.accent : theme.muted },
-                ]}
-              >
-                Ukuran Terbesar
-              </Text>
-            </TouchableOpacity>
-          </ScrollView>
-        </View>
-
-        {/* ── Product List Section ─── */}
-        {filteredProducts.length > 0 ? (
-          <View style={styles.productList}>
-            {filteredProducts.map((fish: Fish) => (
-              <View
-                key={fish.id}
-                style={[
-                  styles.productCard,
-                  {
-                    backgroundColor: theme.surface,
-                    borderColor: theme.line,
-                  },
-                ]}
-              >
-                {/* Image Section with Overlays */}
-                <View
-                  style={[styles.productImageWrap, { backgroundColor: theme.surface2 }]}
-                >
-                  {fish.foto ? (
-                    <Image
-                      source={{ uri: fish.foto }}
-                      style={styles.productImage}
-                      resizeMode="cover"
-                    />
-                  ) : (
-                    <KoiArt varietas={fish.varietas} style={styles.productImage} />
-                  )}
-
-                  {/* Overlays */}
-                  <View style={styles.imgTagRow}>
-                    <View
-                      style={[
-                        styles.gradeTag,
-                        { backgroundColor: 'rgba(0, 0, 0, 0.72)' },
-                      ]}
-                    >
-                      <Text style={styles.gradeTagText}>Grade {fish.grade}</Text>
-                    </View>
-
-                    <View
-                      style={[
-                        styles.mktLiveTag,
-                        { backgroundColor: 'rgba(23, 163, 74, 0.88)' },
-                      ]}
-                    >
-                      <View style={styles.liveDot} />
-                      <Text style={styles.mktLiveText}>Dijual</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Card Body */}
-                <View style={styles.productBody}>
-                  {/* Title & Condition */}
-                  <View style={styles.productTitleRow}>
-                    <Text
-                      style={[styles.productTitle, { color: theme.ink }]}
-                      numberOfLines={1}
-                    >
-                      {fish.varietas}
-                    </Text>
-                    <Badge
-                      label={fish.kondisi}
-                      type={getConditionBadgeType(fish.kondisi)}
-                    />
-                  </View>
-
-                  {/* Specs */}
-                  <Text style={[styles.productSpecs, { color: theme.muted }]}>
-                    {fish.ukuran} cm • {fish.kelamin} • {fish.asal || 'Lokal'}
-                  </Text>
-
-                  {/* Kolam & Stok */}
-                  <View style={styles.metaRow}>
-                    <Text style={[styles.metaPond, { color: theme.ink }]}>
-                      📍 {getPondName(fish.kolamId)}
-                    </Text>
-                    <Text style={[styles.metaStock, { color: theme.accent }]}>
-                      {fish.jumlah} ekor tersedia
-                    </Text>
-                  </View>
-
-                  {/* Price Row */}
-                  <View
-                    style={[
-                      styles.priceBox,
-                      { backgroundColor: theme.surface2, borderColor: theme.line },
-                    ]}
-                  >
-                    <View>
-                      <Text style={[styles.priceSub, { color: theme.muted }]}>
-                        Harga Penjualan
-                      </Text>
-                      <Text style={[styles.priceMain, { color: theme.red }]}>
-                        {rp(fish.hargaJual)}
-                        <Text style={[styles.pricePer, { color: theme.muted }]}>
-                          {' '}
-                          / ekor
-                        </Text>
-                      </Text>
-                    </View>
-                    {fish.jumlah > 1 && (
-                      <Text style={[styles.priceTotal, { color: theme.muted }]}>
-                        Total: {rp(fish.hargaJual * fish.jumlah)}
-                      </Text>
-                    )}
-                  </View>
-
-                  {/* Seller / Farm badge */}
-                  <View style={styles.sellerRow}>
-                    <Text style={[styles.sellerLabel, { color: theme.muted }]}>
-                      Peternak:
-                    </Text>
-                    <Text
-                      style={[styles.sellerName, { color: theme.ink }]}
-                      numberOfLines={1}
-                    >
-                      {user?.displayName || 'Djekkoi Farm'}
-                    </Text>
-                  </View>
-
-                  {/* Action Buttons */}
-                  <View style={styles.cardActions}>
-                    <Button
-                      variant="pri"
-                      style={styles.detailBtn}
-                      onPress={() => openSheet('fishDetail', fish)}
-                    >
-                      Lihat Detail
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      style={styles.disconnectBtn}
-                      onPress={() => toggleDisplay(fish.id)}
-                    >
-                      Batal Jual
-                    </Button>
-                  </View>
-                </View>
-              </View>
-            ))}
-          </View>
-        ) : connectedProducts.length === 0 ? (
-          /* Empty state: tidak ada ikan dengan display=true */
-          <View
-            style={[
-              styles.emptyCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <View style={[styles.emptyIconWrap, { backgroundColor: theme.accentSoft }]}>
-              <Svg
-                width={36}
-                height={36}
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke={theme.accent}
-                strokeWidth={1.8}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <Path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
-                <Line x1={3} y1={6} x2={21} y2={6} />
-                <Path d="M16 10a4 4 0 01-8 0" />
-              </Svg>
-            </View>
-
-            <Text style={[styles.emptyTitle, { color: theme.ink }]}>
-              Belum Ada Ikan di Marketplace
-            </Text>
-
-            <Text style={[styles.emptyDesc, { color: theme.muted }]}>
-              Data ikan Anda belum dipilih untuk ditampilkan di penjualan. Pilih
-              'Tampilkan di penjualan' pada data ikan Anda agar terhubung dan muncul di
-              Marketplace ini.
-            </Text>
-
-            <View style={styles.emptyActions}>
-              <Button
-                variant="pri"
-                wide
-                onPress={() => router.push('/(tabs)/stock')}
-              >
-                Kelola Ikan di Stock
-              </Button>
-              <Button
-                variant="default"
-                wide
-                onPress={() => openSheet('addFish')}
-              >
-                + Tambah Ikan Baru
-              </Button>
-            </View>
-          </View>
-        ) : (
-          /* Empty state pencarian / filter */
-          <View
-            style={[
-              styles.emptyCard,
-              { backgroundColor: theme.surface, borderColor: theme.line },
-            ]}
-          >
-            <Text style={[styles.emptyTitle, { color: theme.ink }]}>
-              Tidak ada ikan yang cocok
-            </Text>
-            <Text style={[styles.emptyDesc, { color: theme.muted }]}>
-              Tidak ditemukan ikan di marketplace dengan kata kunci "{query}".
-            </Text>
-            <Button
-              variant="default"
-              onPress={() => {
-                setQuery('');
-                setSelectedGrade('all');
-              }}
-            >
-              Reset Filter
-            </Button>
-          </View>
-        )}
-      </ScrollView>
+        ItemSeparatorComponent={() => <View style={{ height: 12 }} />}
+      />
     </View>
   );
 }
@@ -729,7 +748,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingHorizontal: 16, paddingTop: 16 },
 
-  // Top header
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -749,108 +767,23 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     lineHeight: 18,
   },
-  onlinePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    marginTop: 6,
-  },
-  onlinePillText: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 12,
-  },
-  pulseDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-
-  // Sim strip
-  simStrip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 14,
-    gap: 10,
-  },
-  simStripTitle: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 13,
-  },
-  simStripSub: {
-    fontFamily: FontNames.sansMedium,
-    fontSize: 11.5,
-    marginTop: 1,
-  },
-  simToggleBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 10,
-    borderWidth: 1,
-  },
-  simToggleText: {
-    fontFamily: FontNames.sansSemiBold,
-    fontSize: 12,
-  },
-
-  // KPI Stats
-  statsRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
-  },
-  statCard: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  statValue: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 18,
-    marginBottom: 2,
-  },
-  statLabel: {
-    fontFamily: FontNames.sansMedium,
-    fontSize: 11,
-    textAlign: 'center',
-  },
 
   // Search
   searchWrap: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: 14,
-    paddingHorizontal: 14,
-    height: 46,
-    gap: 10,
-    marginBottom: 12,
+    borderWidth: 1,
+    marginBottom: 10,
   },
   searchInput: {
     flex: 1,
-    fontFamily: FontNames.sansMedium,
-    fontSize: 14.5,
-  },
-
-  // Filters
-  filterScroll: {
-    marginBottom: 10,
-  },
-  filterContent: {
-    gap: 8,
-    paddingRight: 10,
+    fontFamily: FontNames.sansRegular,
+    fontSize: 14,
+    padding: 0,
   },
 
   // Sort
@@ -858,33 +791,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 14,
   },
   sortLabel: {
     fontFamily: FontNames.sansMedium,
-    fontSize: 12,
+    fontSize: 13,
   },
-  sortContent: {
-    gap: 6,
-  },
+  sortContent: { gap: 6 },
   sortChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
     borderWidth: 1,
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
   },
   sortChipText: {
     fontFamily: FontNames.sansMedium,
-    fontSize: 12,
+    fontSize: 12.5,
   },
 
-  // Product List
-  productList: {
-    gap: 14,
-  },
+  // Product Card
   productCard: {
     borderWidth: 1,
-    borderRadius: 18,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   productImageWrap: {
@@ -1021,7 +949,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Empty state
+  // Empty & Error Card
   emptyCard: {
     borderWidth: 1,
     borderRadius: 20,
@@ -1054,95 +982,15 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 
-  // ── OFFLINE BLOCKING STYLES ──
-  offlineContent: {
-    paddingHorizontal: 20,
-    justifyContent: 'center',
+  // Load More Footer
+  loadMoreSpinner: {
+    paddingVertical: 20,
     alignItems: 'center',
   },
-  offlineCard: {
-    width: '100%',
-    borderWidth: 1,
-    borderRadius: 24,
-    padding: 24,
-    alignItems: 'center',
+
+  // Skeleton
+  skeletonContainer: {
     gap: 12,
-    marginBottom: 20,
-  },
-  offlineIconWrap: {
-    width: 80,
-    height: 80,
-    borderRadius: 26,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 4,
-  },
-  offlineBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-  },
-  offlineBadgeText: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 12.5,
-  },
-  offlineTitle: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 22,
-    textAlign: 'center',
     marginTop: 4,
-  },
-  offlineDesc: {
-    fontFamily: FontNames.sansMedium,
-    fontSize: 14,
-    textAlign: 'center',
-    lineHeight: 21,
-  },
-  simulatedBox: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginVertical: 4,
-    width: '100%',
-    alignItems: 'center',
-  },
-  simulatedText: {
-    fontFamily: FontNames.sansSemiBold,
-    fontSize: 12.5,
-  },
-  offlineActionCol: {
-    width: '100%',
-    gap: 10,
-    marginTop: 10,
-  },
-  checkingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  checkingText: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 14,
-  },
-  infoCard: {
-    width: '100%',
-    borderWidth: 1,
-    borderRadius: 18,
-    padding: 16,
-    gap: 8,
-  },
-  infoTitle: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 14,
-  },
-  infoText: {
-    fontFamily: FontNames.sansRegular,
-    fontSize: 13,
-    lineHeight: 20,
   },
 });

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
@@ -18,7 +18,15 @@ export default function KolamScreen() {
     activePondDetailId,
     setActivePondDetailId,
     openSheet,
+    refresh,
   } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const selectedPond = state.ponds.find((p) => p.id === activePondDetailId);
 
@@ -34,6 +42,13 @@ export default function KolamScreen() {
             { paddingBottom: 110 + Math.max(insets.bottom, 12) },
           ]}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              tintColor={theme.accent}
+            />
+          }
         >
           <Button
             variant="ghost"
@@ -99,6 +114,13 @@ export default function KolamScreen() {
           { paddingBottom: 110 + Math.max(insets.bottom, 12) },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         <Text style={[styles.title, { color: theme.ink }]}>Kolam</Text>
         <Text style={[styles.sub, { color: theme.muted }]}>

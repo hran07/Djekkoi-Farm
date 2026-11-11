@@ -8,9 +8,7 @@ export interface NetworkInfo {
   isInternetReachable: boolean;
   type: string;
   isChecking: boolean;
-  isSimulatedOffline: boolean;
   checkConnection: () => Promise<boolean>;
-  toggleSimulatedOffline: () => void;
 }
 
 export function useNetwork(): NetworkInfo {
@@ -18,11 +16,6 @@ export function useNetwork(): NetworkInfo {
   const [isInternetReachable, setIsInternetReachable] = useState<boolean>(true);
   const [networkType, setNetworkType] = useState<string>('UNKNOWN');
   const [isChecking, setIsChecking] = useState<boolean>(false);
-  const [isSimulatedOffline, setIsSimulatedOffline] = useState<boolean>(false);
-
-  const toggleSimulatedOffline = useCallback(() => {
-    setIsSimulatedOffline((prev) => !prev);
-  }, []);
 
   const evaluateState = useCallback((state: Network.NetworkState) => {
     const connected = state.isConnected ?? true;
@@ -123,7 +116,7 @@ export function useNetwork(): NetworkInfo {
     };
   }, [evaluateState]);
 
-  const isOnline = !isSimulatedOffline && isConnected && isInternetReachable;
+  const isOnline = isConnected && isInternetReachable;
 
   return {
     isOnline,
@@ -131,8 +124,6 @@ export function useNetwork(): NetworkInfo {
     isInternetReachable,
     type: networkType,
     isChecking,
-    isSimulatedOffline,
     checkConnection,
-    toggleSimulatedOffline,
   };
 }

@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames, LOW } from '@/constants/theme';
@@ -12,7 +12,14 @@ import { fdate, rp, sum } from '@/lib/format';
 export default function DashboardScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, periodFilter, setPeriodFilter, getPondName } = useStore();
+  const { state, periodFilter, setPeriodFilter, getPondName, refresh } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const DAY_MS = 86400000;
 
@@ -124,6 +131,13 @@ export default function DashboardScreen() {
         { paddingBottom: 130 + Math.max(insets.bottom, 12) },
       ]}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.accent}
+        />
+      }
     >
       {/* Hero Banner */}
       <PondHero

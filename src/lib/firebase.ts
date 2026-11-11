@@ -1,5 +1,5 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, enableNetwork } from 'firebase/firestore';
 import {
   initializeAuth,
   getAuth,
@@ -21,6 +21,14 @@ const firebaseConfig = {
 
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 export const db = getFirestore(app);
+
+export async function forceFirestoreReconnect(): Promise<void> {
+  try {
+    await enableNetwork(db);
+  } catch (e) {
+    console.warn('forceFirestoreReconnect error:', e);
+  }
+}
 
 let authInstance: Auth;
 try {

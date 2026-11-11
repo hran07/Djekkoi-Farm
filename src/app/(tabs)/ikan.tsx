@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   TextInput,
   ScrollView,
   TouchableOpacity,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -26,7 +27,15 @@ export default function IkanScreen() {
     pondFilter,
     setPondFilter,
     openSheet,
+    refresh,
   } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const q = searchQuery.toLowerCase().trim();
   const filteredFish = state.fish.filter((f) => {
@@ -50,6 +59,13 @@ export default function IkanScreen() {
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         <Text style={[styles.title, { color: theme.ink }]}>Data ikan</Text>
         <Text style={[styles.sub, { color: theme.muted }]}>

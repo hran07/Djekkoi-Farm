@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, Image, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
@@ -13,7 +13,14 @@ import { EmptyState } from '@/components/EmptyState';
 export default function PenjualanScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, toggleDisplay } = useStore();
+  const { state, toggleDisplay, refresh } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const onDisplayFish = state.fish.filter((f) => f.display);
   const hiddenDisplayFish = state.fish.filter((f) => !f.display);
@@ -32,6 +39,13 @@ export default function PenjualanScreen() {
         { paddingBottom: 110 + Math.max(insets.bottom, 12) },
       ]}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.accent}
+        />
+      }
     >
       <Text style={[styles.title, { color: theme.ink }]}>Display penjualan</Text>
       <Text style={[styles.sub, { color: theme.muted }]}>

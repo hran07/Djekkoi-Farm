@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
@@ -13,7 +13,14 @@ import { HistoryEntry } from '@/lib/types';
 export default function RiwayatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, historyFilter, setHistoryFilter } = useStore();
+  const { state, historyFilter, setHistoryFilter, refresh } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const filteredHistory = state.history.filter((h) => {
     if (historyFilter === 'all') return true;
@@ -51,6 +58,13 @@ export default function RiwayatScreen() {
         { paddingBottom: 110 + Math.max(insets.bottom, 12) },
       ]}
       showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefreshing}
+          onRefresh={onRefresh}
+          tintColor={theme.accent}
+        />
+      }
     >
       <Text style={[styles.title, { color: theme.ink }]}>Riwayat</Text>
       <Text style={[styles.sub, { color: theme.muted }]}>

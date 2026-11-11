@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { doc, onSnapshot, setDoc, deleteDoc, collection } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, deleteDoc, collection, getDocFromServer } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { AppState, Fish, HistoryEntry, Pond, SaleInfo, MarketplaceProduct } from '@/lib/types';
 import { fLabel, uid } from '@/lib/format';
@@ -29,10 +29,6 @@ interface StoreContextType {
   state: AppState;
   isLoaded: boolean;
 
-  // Marketplace Global State (Semua produk dari semua user yang dijual)
-  marketplaceProducts: MarketplaceProduct[];
-  isMarketplaceLoaded: boolean;
-
   // UI State
   searchQuery: string;
   setSearchQuery: (q: string) => void;
@@ -56,6 +52,9 @@ interface StoreContextType {
 
   // Clear / Reset State on Logout
   clearStore: () => void;
+
+  // Refresh data dari server
+  refresh: () => Promise<void>;
 
   // Data Actions
   addFish: (fishData: Omit<Fish, 'id' | 'tgl'>) => void;
@@ -89,10 +88,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [state, setState] = useState<AppState>(initialAppState);
   const [isLoaded, setIsLoaded] = useState(false);
 
-  // Marketplace State (Produk dari SEMUA pengguna)
-  const [marketplaceProducts, setMarketplaceProducts] = useState<MarketplaceProduct[]>([]);
-  const [isMarketplaceLoaded, setIsMarketplaceLoaded] = useState(false);
-
   // UI filters
   const [searchQuery, setSearchQuery] = useState('');
   const [pondFilter, setPondFilter] = useState('all');
@@ -113,8 +108,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const clearStore = useCallback(() => {
     setState(initialAppState);
     setIsLoaded(false);
-    setMarketplaceProducts([]);
-    setIsMarketplaceLoaded(false);
     setSearchQuery('');
     setPondFilter('all');
     setActivePondDetailId(null);
@@ -123,58 +116,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     setActiveSheet(null);
     setToastMessage(null);
   }, []);
-
-  // Listen to ALL Marketplace products in real-time
-  useEffect(() => {
-    if (!user) {
-      setMarketplaceProducts([]);
-      setIsMarketplaceLoaded(true);
-      return;
-    }
-
-    const colRef = collection(db, 'marketplace_products');
-    const unsubscribe = onSnapshot(
-      colRef,
-      (snapshot) => {
-        const items: MarketplaceProduct[] = [];
-        snapshot.forEach((docSnap) => {
-          const d = docSnap.data();
-          if (d.display !== false) {
-            items.push({
-              id: docSnap.id,
-              userId: d.userId,
-              sellerName: d.sellerName || 'Peternak Djekkoi',
-              sellerEmail: d.sellerEmail || '',
-              varietas: d.varietas || '',
-              asal: d.asal || '',
-              jumlah: Number(d.jumlah) || 1,
-              ukuran: Number(d.ukuran) || 0,
-              grade: d.grade || 'A',
-              kelamin: d.kelamin || 'Belum diketahui',
-              kondisi: d.kondisi || 'Sehat',
-              hargaBeli: Number(d.hargaBeli) || 0,
-              hargaJual: Number(d.hargaJual) || 0,
-              kolamId: d.kolamId || '',
-              kolamName: d.kolamName || '',
-              catatan: d.catatan || '',
-              display: true,
-              foto: d.foto || null,
-              tgl: d.tgl || new Date().toISOString(),
-              updatedAt: d.updatedAt || new Date().toISOString(),
-            });
-          }
-        });
-        setMarketplaceProducts(items);
-        setIsMarketplaceLoaded(true);
-      },
-      (error) => {
-        console.warn('Failed to listen to marketplace products:', error);
-        setIsMarketplaceLoaded(true);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [user]);
 
   useEffect(() => {
     if (toastMessage) {
@@ -322,6 +263,44 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const closeSheet = useCallback(() => {
     setActiveSheet(null);
   }, []);
+
+  const refresh = useCallback(async () => {
+    if (!user) return;
+    try {
+      const docRef = doc(db, 'user_stores', user.uid);
+      const docSnap = await getDocFromServer(docRef);
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        if (
+          data &&
+          Array.isArray(data.ponds) &&
+          Array.isArray(data.fish) &&
+          Array.isArray(data.history)
+        ) {
+          const userPonds: Pond[] = data.ponds
+            .filter((p: Pond) => !p.userId || p.userId === user.uid)
+            .map((p: Pond) => ({ ...p, userId: user.uid }));
+          const userFish: Fish[] = data.fish
+            .filter((f: Fish) => !f.userId || f.userId === user.uid)
+            .map((f: Fish) => ({ ...f, userId: user.uid }));
+          const userHistory: HistoryEntry[] = data.history
+            .filter((h: HistoryEntry) => !h.userId || h.userId === user.uid)
+            .map((h: HistoryEntry) => ({ ...h, userId: user.uid }));
+
+          setState({
+            userId: user.uid,
+            updatedAt: data.updatedAt || new Date().toISOString(),
+            ponds: userPonds,
+            fish: userFish,
+            history: userHistory,
+            varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
+          });
+        }
+      }
+    } catch {
+      // berhenti diam-diam tanpa toast atau pesan koneksi
+    }
+  }, [user]);
 
   const getPondName = useCallback(
     (id: string): string => {
@@ -798,8 +777,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       value={{
         state,
         isLoaded,
-        marketplaceProducts,
-        isMarketplaceLoaded,
         searchQuery,
         setSearchQuery,
         pondFilter,
@@ -816,6 +793,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         openSheet,
         closeSheet,
         clearStore,
+        refresh,
         addFish,
         editFish,
         sellFish,

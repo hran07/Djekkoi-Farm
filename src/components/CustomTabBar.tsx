@@ -1,43 +1,62 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useTheme } from '@/hooks/useTheme';
-import { FontNames } from '@/constants/theme';
-import { TabIcon, TabIconName } from './TabIcon';
-import { useStore } from '@/context/StoreContext';
+import { FontNames } from "@/constants/theme";
+import { useStore } from "@/context/StoreContext";
+import { useTheme } from "@/hooks/useTheme";
+import { usePathname, useRouter } from "expo-router";
+import React from "react";
+import { StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { TabIcon, TabIconName } from "./TabIcon";
 
 interface TabItemConfig {
   name: string;
+  href: string;
   label: string;
   iconName: TabIconName;
 }
 
 const TAB_CONFIGS: TabItemConfig[] = [
-  { name: 'marketplace', label: 'Marketplace', iconName: 'marketplace' },
-  { name: 'index', label: 'Dashboard', iconName: 'dashboard' },
-  { name: 'stock', label: 'Stock', iconName: 'kelola' },
-  { name: 'account', label: 'Akun', iconName: 'account' },
+  {
+    name: "marketplace",
+    href: "/(tabs)/marketplace",
+    label: "Marketplace",
+    iconName: "marketplace",
+  },
+  { name: "index", href: "/(tabs)", label: "Dashboard", iconName: "dashboard" },
+  { name: "stock", href: "/(tabs)/stock", label: "Stock", iconName: "kelola" },
+  {
+    name: "account",
+    href: "/(tabs)/account",
+    label: "Akun",
+    iconName: "account",
+  },
 ];
-
-// Hanya tampilkan 4 tab yang dikonfigurasi
-const VISIBLE_TAB_NAMES = new Set(TAB_CONFIGS.map((c) => c.name));
 
 export const CustomTabBar: React.FC<any> = ({ state, navigation }) => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const { setActivePondDetailId } = useStore();
-
-  // Filter hanya route yang ada di TAB_CONFIGS
-  const visibleRoutes = state.routes.filter((r: any) => VISIBLE_TAB_NAMES.has(r.name));
+  const router = useRouter();
+  const pathname = usePathname();
 
   const bottomPad = Math.max(insets.bottom, 8);
 
+  const checkIsFocused = (config: TabItemConfig) => {
+    if (state?.routes && typeof state.index === "number") {
+      return state.routes[state.index]?.name === config.name;
+    }
+    if (config.name === "index") {
+      return (
+        pathname === "/" || pathname === "/(tabs)" || pathname === "/index"
+      );
+    }
+    return (
+      pathname === `/${config.name}` || pathname === `/(tabs)/${config.name}`
+    );
+  };
+
   return (
     <View
-      style={[
-        styles.wrapper,
-        { paddingBottom: bottomPad },
-      ]}
+      style={[styles.wrapper, { paddingBottom: bottomPad }]}
       pointerEvents="box-none"
     >
       <View
@@ -50,26 +69,34 @@ export const CustomTabBar: React.FC<any> = ({ state, navigation }) => {
           },
         ]}
       >
-        {visibleRoutes.map((route: any) => {
-          const isFocused = state.routes[state.index]?.name === route.name;
-          const config = TAB_CONFIGS.find((c) => c.name === route.name)!;
+        {TAB_CONFIGS.map((config) => {
+          const isFocused = checkIsFocused(config);
           const color = isFocused ? theme.accent : theme.muted;
 
           const onPress = () => {
             setActivePondDetailId(null);
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
-            if (!isFocused && !event.defaultPrevented) {
-              navigation.navigate(route.name);
+            if (isFocused) return;
+
+            if (navigation?.emit && navigation?.navigate) {
+              const route = state?.routes?.find(
+                (r: any) => r.name === config.name,
+              );
+              const event = navigation.emit({
+                type: "tabPress",
+                target: route?.key,
+                canPreventDefault: true,
+              });
+              if (!event?.defaultPrevented) {
+                navigation.navigate(config.name);
+              }
+            } else {
+              router.push(config.href as any);
             }
           };
 
           return (
             <TouchableOpacity
-              key={route.key}
+              key={config.name}
               style={styles.tabButton}
               onPress={onPress}
               accessibilityRole="button"
@@ -88,8 +115,14 @@ export const CustomTabBar: React.FC<any> = ({ state, navigation }) => {
               )}
 
               {/* Icon wrapper with scale effect */}
-              <View style={[styles.iconWrap, isFocused && styles.iconWrapActive]}>
-                <TabIcon name={config.iconName} color={color} size={isFocused ? 22 : 21} />
+              <View
+                style={[styles.iconWrap, isFocused && styles.iconWrapActive]}
+              >
+                <TabIcon
+                  name={config.iconName}
+                  color={color}
+                  size={isFocused ? 22 : 21}
+                />
               </View>
 
               {/* Label */}
@@ -113,21 +146,20 @@ export const CustomTabBar: React.FC<any> = ({ state, navigation }) => {
 
 const styles = StyleSheet.create({
   wrapper: {
-    position: 'absolute',
+    position: "absolute",
     left: 0,
     right: 0,
     bottom: 0,
     paddingHorizontal: 14,
     zIndex: 30,
-    pointerEvents: 'box-none',
+    pointerEvents: "box-none",
   } as any,
   bar: {
-    flexDirection: 'row',
+    flexDirection: "row",
     borderRadius: 28,
     borderWidth: 1,
     paddingVertical: 8,
     paddingHorizontal: 6,
-    // Shadow
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.18,
     shadowRadius: 24,
@@ -135,11 +167,11 @@ const styles = StyleSheet.create({
   },
   tabButton: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingVertical: 6,
     gap: 3,
-    position: 'relative',
+    position: "relative",
     borderRadius: 22,
     minHeight: 56,
   },
@@ -152,8 +184,8 @@ const styles = StyleSheet.create({
   iconWrap: {
     width: 32,
     height: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderRadius: 10,
   },
   iconWrapActive: {
@@ -169,5 +201,3 @@ const styles = StyleSheet.create({
     fontFamily: FontNames.sansSemiBold,
   },
 });
-
-

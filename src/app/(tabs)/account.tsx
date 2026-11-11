@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   Switch,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path, Circle } from 'react-native-svg';
@@ -51,7 +52,14 @@ export default function AccountScreen() {
   const { isDark, setDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { user, profile, logout } = useAuth();
-  const { state, historyFilter, setHistoryFilter } = useStore();
+  const { state, historyFilter, setHistoryFilter, refresh } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameInput, setNameInput] = useState(profile?.name ?? '');
@@ -133,6 +141,13 @@ export default function AccountScreen() {
           { paddingBottom: 100 + Math.max(insets.bottom, 12) },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         {/* ── Page Title ─── */}
         <Text style={[styles.pageTitle, { color: theme.ink }]}>Akun</Text>

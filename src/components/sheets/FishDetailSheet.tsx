@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Image } from 'react-native';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
@@ -7,17 +7,169 @@ import { fdate, rp } from '@/lib/format';
 import { Badge, BadgeType } from '../Badge';
 import { KoiArt } from '../KoiArt';
 import { Button } from '../Button';
+import { Skeleton } from '../Skeleton';
 import { useStore } from '@/context/StoreContext';
 import { useAuth } from '@/context/AuthContext';
+import { db, forceFirestoreReconnect } from '@/lib/firebase';
+import { doc, getDocFromServer } from 'firebase/firestore';
+import { useAutoReconnect } from '@/hooks/useAutoReconnect';
 
 interface FishDetailSheetProps {
   fish: Fish;
 }
 
-export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
+const DETAIL_TIMEOUT_MS = 10000;
+
+function DetailSheetSkeleton() {
+  const theme = useTheme();
+
+  return (
+    <View style={styles.container}>
+      {/* Gambar 16:10 */}
+      <Skeleton
+        width="100%"
+        height={210}
+        borderRadius={16}
+        style={{ marginBottom: 12 }}
+      />
+
+      {/* Tabel Detail */}
+      <View
+        style={[
+          styles.kvTable,
+          { backgroundColor: theme.surface, borderColor: theme.line },
+        ]}
+      >
+        {[1, 2, 3, 4, 5, 6, 7, 8].map((item, idx) => (
+          <View
+            key={item}
+            style={[
+              styles.kvRow,
+              {
+                borderBottomColor: theme.line,
+                borderBottomWidth: idx === 7 ? 0 : 1,
+              },
+            ]}
+          >
+            <Skeleton width="35%" height={15} borderRadius={4} />
+            <Skeleton width="45%" height={15} borderRadius={4} />
+          </View>
+        ))}
+      </View>
+
+      {/* Button Skeleton */}
+      <View style={styles.buttonGroup}>
+        <Skeleton width="100%" height={46} borderRadius={12} />
+      </View>
+    </View>
+  );
+}
+
+export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
+  fish: initialFish,
+}) => {
   const theme = useTheme();
   const { user } = useAuth();
-  const { getPondName, openSheet, toggleDisplay, closeSheet, showToast } = useStore();
+  const { getPondName, openSheet, toggleDisplay, closeSheet, showToast } =
+    useStore();
+
+  const isMarketplaceItem = Boolean(
+    (initialFish as MarketplaceProduct).sellerName !== undefined
+  );
+  const [fish, setFish] = useState<Fish>(initialFish);
+  const [fetchState, setFetchState] = useState<'loading' | 'done' | 'error'>(
+    isMarketplaceItem ? 'loading' : 'done'
+  );
+
+  const fetchIdRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const fetchDetail = useCallback(async () => {
+    const currentFetchId = ++fetchIdRef.current;
+    console.log(`[FishDetailSheet] attempt #${currentFetchId}: loading`);
+    setFetchState('loading');
+
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Timeout 10 detik eksplisit
+    timerRef.current = setTimeout(() => {
+      if (fetchIdRef.current === currentFetchId) {
+        console.log(`[FishDetailSheet] attempt #${currentFetchId}: timeout 10s triggered -> error`);
+        setFetchState('error');
+      }
+    }, DETAIL_TIMEOUT_MS);
+
+    try {
+      const docRef = doc(db, 'marketplace_products', initialFish.id);
+      // Menggunakan getDocFromServer agar tidak membaca cache
+      const snap = await getDocFromServer(docRef);
+
+      if (fetchIdRef.current === currentFetchId) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+
+        console.log(
+          `[FishDetailSheet] attempt #${currentFetchId}: success, fromCache: ${snap.metadata.fromCache}`
+        );
+
+        if (snap.exists()) {
+          const d = snap.data();
+          setFish({
+            ...initialFish,
+            jumlah: Number(d.jumlah) || initialFish.jumlah,
+            hargaJual: Number(d.hargaJual) || initialFish.hargaJual,
+            hargaBeli: Number(d.hargaBeli) || initialFish.hargaBeli,
+            kondisi: d.kondisi || initialFish.kondisi,
+            catatan: d.catatan || initialFish.catatan,
+            display: d.display ?? initialFish.display,
+            updatedAt: d.updatedAt,
+            sellerName: d.sellerName,
+            sellerEmail: d.sellerEmail,
+            kolamName: d.kolamName,
+          } as MarketplaceProduct);
+        }
+        setFetchState('done');
+      }
+    } catch (err) {
+      if (fetchIdRef.current === currentFetchId) {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        console.log(`[FishDetailSheet] attempt #${currentFetchId}: error`, err);
+        setFetchState('error');
+      }
+    }
+  }, [initialFish]);
+
+  const handleRetry = useCallback(async () => {
+    await forceFirestoreReconnect();
+    fetchDetail();
+  }, [fetchDetail]);
+
+  // Pemulihan otomatis saat koneksi kembali
+  useAutoReconnect(
+    handleRetry,
+    isMarketplaceItem && (fetchState === 'loading' || fetchState === 'error')
+  );
+
+  useEffect(() => {
+    if (isMarketplaceItem) {
+      fetchDetail();
+    }
+
+    return () => {
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isOwner = !fish.userId || fish.userId === user?.uid;
   const mktProduct = fish as MarketplaceProduct;
@@ -30,6 +182,29 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
 
   const margin = fish.hargaJual - fish.hargaBeli;
 
+  // ── Loading state (Skeleton Detail) ────────────────────────
+  if (fetchState === 'loading') {
+    return <DetailSheetSkeleton />;
+  }
+
+  // ── Error state (SATU-SATUNYA tempat pesan koneksi boleh muncul) ──
+  if (fetchState === 'error') {
+    return (
+      <View style={styles.errorWrap}>
+        <Text style={[styles.errorTitle, { color: theme.ink }]}>
+          Gagal memuat detail
+        </Text>
+        <Text style={[styles.errorDesc, { color: theme.muted }]}>
+          Tidak dapat mengambil data produk. Periksa koneksi Anda, lalu coba lagi.
+        </Text>
+        <Button variant="pri" wide onPress={handleRetry}>
+          Coba Lagi
+        </Button>
+      </View>
+    );
+  }
+
+  // ── Normal detail view ─────────────────────────────────────
   const tableRows: { label: string; value: React.ReactNode }[] = [
     { label: 'Asal', value: fish.asal || '-' },
     { label: 'Jumlah', value: `${fish.jumlah} ekor` },
@@ -56,7 +231,10 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
         ]
       : [
           { label: 'Harga jual', value: rp(fish.hargaJual) },
-          { label: 'Peternak / Penjual', value: mktProduct.sellerName || 'Peternak Djekkoi' },
+          {
+            label: 'Peternak / Penjual',
+            value: mktProduct.sellerName || 'Peternak Djekkoi',
+          },
           { label: 'Email Kontak', value: mktProduct.sellerEmail || '-' },
         ]),
     {
@@ -77,13 +255,22 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
     <View style={styles.container}>
       <View style={[styles.heroImgWrap, { backgroundColor: theme.surface2 }]}>
         {fish.foto ? (
-          <Image source={{ uri: fish.foto }} style={styles.heroImg} resizeMode="cover" />
+          <Image
+            source={{ uri: fish.foto }}
+            style={styles.heroImg}
+            resizeMode="cover"
+          />
         ) : (
           <KoiArt varietas={fish.varietas} style={styles.heroImg} />
         )}
       </View>
 
-      <View style={[styles.kvTable, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+      <View
+        style={[
+          styles.kvTable,
+          { backgroundColor: theme.surface, borderColor: theme.line },
+        ]}
+      >
         {tableRows.map((row, idx) => (
           <View
             key={row.label}
@@ -138,7 +325,9 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
                 style={styles.halfBtn}
                 onPress={() => toggleDisplay(fish.id)}
               >
-                {fish.display ? 'Sembunyikan dari penjualan' : 'Tampilkan di penjualan'}
+                {fish.display
+                  ? 'Sembunyikan dari penjualan'
+                  : 'Tampilkan di penjualan'}
               </Button>
             </View>
 
@@ -158,7 +347,11 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
               wide
               onPress={() => {
                 showToast(
-                  `Kontak peternak: ${mktProduct.sellerEmail || mktProduct.sellerName || 'Peternak Djekkoi'}`
+                  `Kontak peternak: ${
+                    mktProduct.sellerEmail ||
+                    mktProduct.sellerName ||
+                    'Peternak Djekkoi'
+                  }`
                 );
               }}
             >
@@ -177,6 +370,23 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({ fish }) => {
 const styles = StyleSheet.create({
   container: {
     paddingBottom: 10,
+  },
+  errorWrap: {
+    paddingVertical: 28,
+    paddingHorizontal: 8,
+    alignItems: 'center',
+    gap: 12,
+  },
+  errorTitle: {
+    fontFamily: FontNames.sansBold,
+    fontSize: 18,
+    textAlign: 'center',
+  },
+  errorDesc: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 13.5,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   heroImgWrap: {
     width: '100%',

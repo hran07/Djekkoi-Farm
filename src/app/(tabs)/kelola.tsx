@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TextInput,
   TouchableOpacity,
   Animated,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
@@ -28,8 +29,15 @@ type ActiveTab = 'kolam' | 'ikan';
 function KolamContent() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, activePondDetailId, setActivePondDetailId, openSheet } =
+  const { state, activePondDetailId, setActivePondDetailId, openSheet, refresh } =
     useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const selectedPond = state.ponds.find((p) => p.id === activePondDetailId);
 
@@ -46,6 +54,13 @@ function KolamContent() {
           { paddingBottom: 110 + Math.max(insets.bottom, 12) },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         <Button
           variant="ghost"
@@ -112,6 +127,13 @@ function KolamContent() {
           { paddingBottom: 110 + Math.max(insets.bottom, 12) },
         ]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         {state.ponds.length > 0 ? (
           <View style={styles.list}>
@@ -159,8 +181,22 @@ function KolamContent() {
 function IkanContent() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { state, searchQuery, setSearchQuery, pondFilter, setPondFilter, openSheet } =
-    useStore();
+  const {
+    state,
+    searchQuery,
+    setSearchQuery,
+    pondFilter,
+    setPondFilter,
+    openSheet,
+    refresh,
+  } = useStore();
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await refresh();
+    setIsRefreshing(false);
+  }, [refresh]);
 
   const q = searchQuery.toLowerCase().trim();
   const filteredFish = state.fish.filter((f) => {
@@ -184,6 +220,13 @@ function IkanContent() {
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.accent}
+          />
+        }
       >
         {/* Search Input */}
         <View
