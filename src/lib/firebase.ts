@@ -1,13 +1,17 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
+import {
+  initializeApp,
+  getApps,
+  getApp,
+} from 'firebase/app';
 import { getFirestore, enableNetwork, disableNetwork } from 'firebase/firestore';
 import {
   initializeAuth,
   getAuth,
   Auth,
+  // @ts-ignore
+  getReactNativePersistence,
 } from 'firebase/auth';
-// @ts-expect-error Firebase exports getReactNativePersistence in React Native runtime bundle
-import { getReactNativePersistence } from 'firebase/auth';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { secureStoragePersistence } from './secureStoragePersistence';
 
 const firebaseConfig = {
   apiKey: "AIzaSyB28PpZMR8egA1FyjEvlAKvYlUbvat5KOI",
@@ -48,7 +52,7 @@ export async function forceFirestoreReconnect(): Promise<void> {
 let authInstance: Auth;
 try {
   authInstance = initializeAuth(app, {
-    persistence: getReactNativePersistence(AsyncStorage),
+    persistence: getReactNativePersistence(secureStoragePersistence),
   });
 } catch {
   authInstance = getAuth(app);
