@@ -55,7 +55,7 @@ export default function AccountScreen() {
   const { isDark, setDark } = useAppTheme();
   const insets = useSafeAreaInsets();
   const { user, profile, logout } = useAuth();
-  const { state, historyFilter, setHistoryFilter, refresh } = useStore();
+  const { state, historyFilter, setHistoryFilter, refresh, openSheet, wipeData } = useStore();
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   const { todos, status: todoStatus, reload: reloadTodos } = useTodos(user?.uid);
@@ -151,6 +151,16 @@ export default function AccountScreen() {
       ],
       { cancelable: true }
     );
+  };
+
+  // ── Kosongkan Data Akun ───────────────────────
+  const handleWipePress = () => {
+    openSheet('confirm', {
+      title: 'Konfirmasi Hapus Data',
+      message: 'Semua ikan, kolam, dan riwayat di akun ini akan dihapus permanen. Tindakan ini tidak bisa dibatalkan.',
+      confirmLabel: 'Ya, hapus semua',
+      onConfirm: wipeData,
+    });
   };
 
   return (
@@ -307,6 +317,50 @@ export default function AccountScreen() {
               <Path d="M9 18l6-6-6-6" />
             </Svg>
           </TouchableOpacity>
+
+          <Divider />
+
+          {/* Lokasi Toko */}
+          <TouchableOpacity
+            style={styles.row}
+            onPress={() => router.push('/store-location' as any)}
+            accessibilityRole="button"
+            accessibilityLabel={`Lokasi Toko, ${profile?.store?.name ? profile.store.name : 'Belum diatur'}`}
+          >
+            <View style={styles.rowLeft}>
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={theme.accent}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+                <Circle cx={12} cy={10} r={3} />
+              </Svg>
+              <View>
+                <Text style={[styles.rowLabel, { color: theme.ink }]}>Lokasi Toko</Text>
+                <Text style={[styles.rowSub, { color: theme.muted }]}>
+                  {profile?.store?.name ? profile.store.name : 'Belum diatur'}
+                </Text>
+              </View>
+            </View>
+            <Svg
+              width={18}
+              height={18}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={theme.muted}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <Path d="M9 18l6-6-6-6" />
+            </Svg>
+          </TouchableOpacity>
         </SectionCard>
 
         {/* ── TAMPILAN ─── */}
@@ -403,6 +457,20 @@ export default function AccountScreen() {
           </View>
         </SectionCard>
 
+        {/* ── Kosongkan Data Akun Button ─── */}
+        <TouchableOpacity
+          style={[styles.wipeBtn, { backgroundColor: theme.surface, borderColor: theme.line }]}
+          onPress={handleWipePress}
+          accessibilityRole="button"
+          accessibilityLabel="Kosongkan data akun ini"
+        >
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none"
+            stroke={theme.muted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
+            <Path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2M10 11v6M14 11v6" />
+          </Svg>
+          <Text style={[styles.wipeText, { color: theme.muted }]}>Kosongkan Data Akun Ini</Text>
+        </TouchableOpacity>
+
         {/* ── Logout Button ─── */}
         <TouchableOpacity
           style={[styles.logoutBtn, { backgroundColor: theme.redSoft, borderColor: theme.red }]}
@@ -488,7 +556,18 @@ const styles = StyleSheet.create({
   historyList: { paddingHorizontal: 16, paddingBottom: 8 },
   historyGroup: { marginBottom: 12 },
   dayTitle: { fontFamily: FontNames.sansBold, fontSize: 13.5, marginTop: 12, marginBottom: 6 },
-  // ── Logout ───────────────────────────────────
+  // ── Kosongkan Data & Logout ───────────────────
+  wipeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingVertical: 14,
+    marginBottom: 10,
+  },
+  wipeText: { fontFamily: FontNames.sansSemiBold, fontSize: 14 },
   logoutBtn: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -24,6 +24,7 @@ import { db, forceFirestoreReconnect } from '@/lib/firebase';
 import { useAutoReconnect, checkIsDeviceOnline } from '@/hooks/useAutoReconnect';
 import { rp } from '@/lib/format';
 import { MarketplaceProduct } from '@/lib/types';
+import { formatDistance, getCachedSessionCoords, haversineMeters } from '@/lib/location';
 import {
   collection,
   getDocsFromServer,
@@ -64,6 +65,10 @@ function parseProduct(docSnap: QueryDocumentSnapshot): MarketplaceProduct {
     foto: d.foto || null,
     tgl: d.tgl || new Date().toISOString(),
     updatedAt: d.updatedAt || new Date().toISOString(),
+    storeName: d.storeName || undefined,
+    storeLat: typeof d.storeLat === 'number' ? d.storeLat : undefined,
+    storeLng: typeof d.storeLng === 'number' ? d.storeLng : undefined,
+    storeAddress: d.storeAddress || undefined,
   };
 }
 
@@ -522,6 +527,15 @@ export default function MarketplaceScreen() {
   // ─── Render Item Produk ───────────────────────────────────────────
   const renderItem = ({ item: product }: { item: MarketplaceProduct }) => {
     const isOwner = product.userId === user?.uid;
+    const sessionCoords = getCachedSessionCoords();
+    const distanceBadge =
+      sessionCoords &&
+      typeof product.storeLat === 'number' &&
+      typeof product.storeLng === 'number'
+        ? formatDistance(
+            haversineMeters(sessionCoords, { lat: product.storeLat, lng: product.storeLng })
+          )
+        : null;
     return (
       <View
         style={[
@@ -588,9 +602,16 @@ export default function MarketplaceScreen() {
 
           {/* Kolam & Stok */}
           <View style={styles.metaRow}>
-            <Text style={[styles.metaPond, { color: theme.ink }]}>
-              📍 {product.kolamName || '-'}
-            </Text>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <Text style={[styles.metaPond, { color: theme.ink }]} numberOfLines={1}>
+                📍 {product.storeName || product.kolamName || '-'}
+              </Text>
+              {distanceBadge && (
+                <Text style={{ fontSize: 11, color: theme.accent, fontFamily: FontNames.sansSemiBold }}>
+                  ({distanceBadge})
+                </Text>
+              )}
+            </View>
             <Text style={[styles.metaStock, { color: theme.accent }]}>
               {product.jumlah} ekor tersedia
             </Text>

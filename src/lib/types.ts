@@ -57,11 +57,20 @@ export interface AppState {
   varietyHistory: string[];
 }
 
+export interface StoreLocation {
+  name: string;
+  lat: number;
+  lng: number;
+  address: string;
+  updatedAt: string;
+}
+
 export interface UserProfile {
   uid: string;
   name: string;
   email: string;
   createdAt: string;
+  store?: StoreLocation;
 }
 
 export interface MarketplaceProduct extends Fish {
@@ -69,15 +78,21 @@ export interface MarketplaceProduct extends Fish {
   sellerEmail?: string;
   kolamName?: string;
   updatedAt?: string;
+  storeName?: string;
+  storeLat?: number;
+  storeLng?: number;
+  storeAddress?: string;
 }
 
 export interface Conversation {
   id: string;
   participants: [string, string];
+  participantNames: Record<string, string>;
   productId: string;
   productName: string;
   lastMessage?: string;
   lastMessageAt?: string;
+  lastSenderId?: string;
   createdAt: string;
 }
 

@@ -1,32 +1,246 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Path } from 'react-native-svg';
-import { useTheme } from '@/hooks/useTheme';
-import { FontNames } from '@/constants/theme';
-import { Button } from '@/components/Button';
+import { Button } from "@/components/Button";
+import { FontNames } from "@/constants/theme";
+import { useAuth } from "@/context/AuthContext";
+import { useTheme } from "@/hooks/useTheme";
+import {
+    getOrCreateConversation,
+    sendMessage,
+    subscribeMessages,
+} from "@/lib/chat";
+import { ChatMessage, Conversation } from "@/lib/types";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+    ActivityIndicator,
+    FlatList,
+    KeyboardAvoidingView,
+    Platform,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import Svg, { Path } from "react-native-svg";
+
+function formatMessageTime(isoStr: string): string {
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return "";
+    const hours = String(d.getHours()).padStart(2, "0");
+    const mins = String(d.getMinutes()).padStart(2, "0");
+    return `${hours}:${mins}`;
+  } catch {
+    return "";
+  }
+}
 
 export default function ChatScreen() {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user, profile } = useAuth();
 
   const {
     conversationId,
+    sellerId,
     sellerName,
-    productName,
+    currentUserName,
     productId,
+    productName,
   } = useLocalSearchParams<{
     conversationId: string;
     sellerId?: string;
     sellerName?: string;
+    currentUserName?: string;
     productId?: string;
     productName?: string;
   }>();
 
-  const displayName = sellerName || 'Peternak Djekkoi';
-  const displayProduct = productName || 'Ikan Koi';
+  const [conversation, setConversation] = useState<Conversation | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [inputText, setInputText] = useState("");
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSending, setIsSending] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const flatListRef = useRef<FlatList<ChatMessage>>(null);
+
+  const initChat = useCallback(async () => {
+    if (!user || !conversationId) return;
+
+    try {
+      // Pastikan percakapan dibuat atau diambil dari Firestore
+      const targetSellerId = sellerId || "";
+      const targetProductId = productId || "";
+      const targetProductName = productName || "Ikan Koi";
+      const myName =
+        currentUserName || profile?.name || user.displayName || "Pembeli";
+      const sName = sellerName || "Penjual";
+
+      if (targetSellerId && targetProductId) {
+        const conv = await getOrCreateConversation({
+          currentUserId: user.uid,
+          currentUserName: myName,
+          sellerId: targetSellerId,
+          sellerName: sName,
+          productId: targetProductId,
+          productName: targetProductName,
+        });
+        setConversation(conv);
+      }
+    } catch (err: any) {
+      console.warn("[ChatScreen] initChat warning:", err?.message || err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [
+    user,
+    conversationId,
+    sellerId,
+    sellerName,
+    currentUserName,
+    productId,
+    productName,
+    profile,
+  ]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!user || !conversationId) return;
+
+    const run = async () => {
+      try {
+        const targetSellerId = sellerId || '';
+        const targetProductId = productId || '';
+        const targetProductName = productName || 'Ikan Koi';
+        const myName = currentUserName || profile?.name || user.displayName || 'Pembeli';
+        const sName = sellerName || 'Penjual';
+
+        if (targetSellerId && targetProductId) {
+          const conv = await getOrCreateConversation({
+            currentUserId: user.uid,
+            currentUserName: myName,
+            sellerId: targetSellerId,
+            sellerName: sName,
+            productId: targetProductId,
+            productName: targetProductName,
+          });
+          if (!cancelled) {
+            setConversation(conv);
+          }
+        }
+      } catch (err: any) {
+        console.warn('[ChatScreen] initChat warning:', err?.message || err);
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [user, conversationId, sellerId, sellerName, currentUserName, productId, productName, profile]);
+
+  // Berlangganan pesan secara realtime
+  useEffect(() => {
+    if (!conversationId) return;
+
+    const unsubscribe = subscribeMessages(
+      conversationId,
+      (newMessages) => {
+        setMessages(newMessages);
+        setIsLoading(false);
+        setErrorMsg(null);
+      },
+      (err) => {
+        console.warn("[ChatScreen] subscribe error:", err?.message || err);
+        setErrorMsg("Gagal memuat pesan. Periksa koneksi internet Anda.");
+        setIsLoading(false);
+      },
+    );
+
+    return () => {
+      unsubscribe();
+    };
+  }, [conversationId]);
+
+  const handleSend = async () => {
+    const trimmed = inputText.trim();
+    if (!trimmed || isSending || !user || !conversationId) return;
+
+    try {
+      setIsSending(true);
+      setInputText("");
+      await sendMessage(conversationId, trimmed, user.uid);
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 50);
+    } catch (err: any) {
+      console.warn("[ChatScreen] Gagal mengirim pesan:", err?.message || err);
+      setInputText(trimmed);
+      setErrorMsg("Gagal mengirim pesan. Silakan coba lagi.");
+    } finally {
+      setIsSending(false);
+    }
+  };
+
+  // Menentukan nama lawan bicara
+  const otherUid = conversation?.participants.find((uid) => uid !== user?.uid);
+  const otherName =
+    (otherUid && conversation?.participantNames[otherUid]) ||
+    sellerName ||
+    "Peternak Djekkoi";
+  const displayProduct = conversation?.productName || productName || "Ikan Koi";
+
+  const renderItem = ({ item }: { item: ChatMessage }) => {
+    const isOwn = item.senderId === user?.uid;
+    const timeStr = formatMessageTime(item.createdAt);
+
+    return (
+      <View
+        style={[
+          styles.bubbleRow,
+          isOwn ? styles.bubbleRowOwn : styles.bubbleRowOther,
+        ]}
+      >
+        <View
+          style={[
+            styles.bubble,
+            isOwn
+              ? [styles.bubbleOwn, { backgroundColor: theme.accent }]
+              : [
+                  styles.bubbleOther,
+                  { backgroundColor: theme.surface, borderColor: theme.line },
+                ],
+          ]}
+        >
+          <Text
+            style={[
+              styles.messageText,
+              { color: isOwn ? "#ffffff" : theme.ink },
+            ]}
+          >
+            {item.text}
+          </Text>
+          {Boolean(timeStr) && (
+            <Text
+              style={[
+                styles.timeText,
+                { color: isOwn ? "rgba(255, 255, 255, 0.7)" : theme.muted },
+              ]}
+            >
+              {timeStr}
+            </Text>
+          )}
+        </View>
+      </View>
+    );
+  };
 
   return (
     <View
@@ -39,7 +253,7 @@ export default function ChatScreen() {
         },
       ]}
     >
-      {/* Header */}
+      {/* ── Header ────────────────────────────────────────── */}
       <View
         style={[
           styles.header,
@@ -73,8 +287,11 @@ export default function ChatScreen() {
         </TouchableOpacity>
 
         <View style={styles.headerInfo}>
-          <Text style={[styles.headerTitle, { color: theme.ink }]} numberOfLines={1}>
-            {displayName}
+          <Text
+            style={[styles.headerTitle, { color: theme.ink }]}
+            numberOfLines={1}
+          >
+            {otherName}
           </Text>
           <Text
             style={[styles.headerSubtitle, { color: theme.accent }]}
@@ -85,79 +302,140 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Body / Placeholder Content */}
-      <View style={styles.content}>
-        <View
-          style={[
-            styles.placeholderCard,
-            { backgroundColor: theme.surface, borderColor: theme.line },
-          ]}
-        >
-          <View
-            style={[
-              styles.iconCircle,
-              { backgroundColor: theme.accentSoft },
-            ]}
-          >
-            <Svg
-              width={36}
-              height={36}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke={theme.accent}
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </Svg>
-          </View>
-
-          <Text style={[styles.title, { color: theme.ink }]}>
-            Fitur Chat Segera Hadir
-          </Text>
-
-          <Text style={[styles.desc, { color: theme.muted }]}>
-            Anda akan dapat berdiskusi langsung dengan penjual{' '}
-            <Text style={{ fontFamily: FontNames.sansBold, color: theme.ink }}>
-              {displayName}
-            </Text>{' '}
-            mengenai ketersediaan dan negosiasi untuk{' '}
-            <Text style={{ fontFamily: FontNames.sansBold, color: theme.accent }}>
-              {displayProduct}
+      {/* ── Konten Chat & Keyboard ─────────────────────────── */}
+      <KeyboardAvoidingView
+        style={styles.keyboardWrap}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        keyboardVerticalOffset={Platform.OS === "ios" ? 12 : 0}
+      >
+        {isLoading ? (
+          <View style={styles.centerBox}>
+            <ActivityIndicator size="large" color={theme.accent} />
+            <Text style={[styles.loadingText, { color: theme.muted }]}>
+              Memuat percakapan...
             </Text>
-            .
-          </Text>
-
-          {Boolean(conversationId) && (
+          </View>
+        ) : errorMsg && messages.length === 0 ? (
+          <View style={styles.centerBox}>
+            <Text style={[styles.errorText, { color: theme.red }]}>
+              {errorMsg}
+            </Text>
+            <Button
+              variant="default"
+              onPress={initChat}
+              style={{ marginTop: 12 }}
+            >
+              Coba Lagi
+            </Button>
+          </View>
+        ) : messages.length === 0 ? (
+          <View style={styles.centerBox}>
             <View
               style={[
-                styles.convIdBadge,
-                { backgroundColor: theme.surface2, borderColor: theme.line },
+                styles.emptyIconCircle,
+                { backgroundColor: theme.accentSoft },
               ]}
             >
-              <Text style={[styles.convIdLabel, { color: theme.muted }]}>
-                ID Percakapan:
-              </Text>
-              <Text
-                style={[styles.convIdValue, { color: theme.ink }]}
-                numberOfLines={1}
+              <Svg
+                width={32}
+                height={32}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={theme.accent}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
               >
-                {conversationId}
-              </Text>
+                <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </Svg>
             </View>
-          )}
+            <Text style={[styles.emptyTitle, { color: theme.ink }]}>
+              Belum ada pesan
+            </Text>
+            <Text style={[styles.emptyDesc, { color: theme.muted }]}>
+              Mulai percakapan dengan {otherName} mengenai {displayProduct}.
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderItem}
+            contentContainerStyle={styles.listContent}
+            onContentSizeChange={() =>
+              flatListRef.current?.scrollToEnd({ animated: true })
+            }
+            onLayout={() =>
+              flatListRef.current?.scrollToEnd({ animated: false })
+            }
+          />
+        )}
 
-          <Button
-            variant="pri"
-            wide
-            style={{ marginTop: 8 }}
-            onPress={() => router.back()}
+        {/* ── Input Bar ──────────────────────────────────────── */}
+        <View
+          style={[
+            styles.inputContainer,
+            {
+              backgroundColor: theme.surface,
+              borderTopColor: theme.line,
+            },
+          ]}
+        >
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.bg,
+                borderColor: theme.line,
+                color: theme.ink,
+              },
+            ]}
+            placeholder="Ketik pesan..."
+            placeholderTextColor={theme.muted}
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={1000}
+            accessibilityLabel="Input teks pesan"
+          />
+
+          <TouchableOpacity
+            style={[
+              styles.sendBtn,
+              {
+                backgroundColor:
+                  inputText.trim().length > 0 && !isSending
+                    ? theme.accent
+                    : theme.surface2,
+              },
+            ]}
+            onPress={handleSend}
+            disabled={inputText.trim().length === 0 || isSending}
+            accessibilityRole="button"
+            accessibilityLabel="Kirim pesan"
+            activeOpacity={0.8}
           >
-            Kembali ke Marketplace
-          </Button>
+            {isSending ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Svg
+                width={18}
+                height={18}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke={inputText.trim().length > 0 ? "#ffffff" : theme.muted}
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <Path d="M22 2L11 13" />
+                <Path d="M22 2L15 22L11 13L2 9L22 2Z" />
+              </Svg>
+            )}
+          </TouchableOpacity>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -167,8 +445,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
@@ -179,8 +457,8 @@ const styles = StyleSheet.create({
     height: 40,
     borderRadius: 12,
     borderWidth: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
   },
   headerInfo: {
     flex: 1,
@@ -194,55 +472,111 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     marginTop: 1,
   },
-  content: {
+  keyboardWrap: {
     flex: 1,
-    padding: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
-  placeholderCard: {
-    width: '100%',
-    maxWidth: 420,
-    borderRadius: 20,
+  listContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    gap: 10,
+  },
+  bubbleRow: {
+    flexDirection: "row",
+    marginVertical: 3,
+  },
+  bubbleRowOwn: {
+    justifyContent: "flex-end",
+  },
+  bubbleRowOther: {
+    justifyContent: "flex-start",
+  },
+  bubble: {
+    maxWidth: "78%",
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
     borderWidth: 1,
-    padding: 24,
-    alignItems: 'center',
-    gap: 14,
   },
-  iconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 4,
+  bubbleOwn: {
+    borderColor: "transparent",
+    borderBottomRightRadius: 4,
   },
-  title: {
-    fontFamily: FontNames.sansBold,
-    fontSize: 19,
-    textAlign: 'center',
+  bubbleOther: {
+    borderBottomLeftRadius: 4,
   },
-  desc: {
+  messageText: {
+    fontFamily: FontNames.sansRegular,
+    fontSize: 14.5,
+    lineHeight: 20,
+  },
+  timeText: {
     fontFamily: FontNames.sansMedium,
-    fontSize: 13.5,
-    lineHeight: 21,
-    textAlign: 'center',
-  },
-  convIdBadge: {
-    width: '100%',
-    borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
+    fontSize: 10.5,
+    alignSelf: "flex-end",
     marginTop: 4,
   },
-  convIdLabel: {
-    fontFamily: FontNames.sansMedium,
-    fontSize: 11,
-    marginBottom: 2,
+  centerBox: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    padding: 24,
   },
-  convIdValue: {
+  loadingText: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 13.5,
+    marginTop: 12,
+  },
+  errorText: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 13.5,
+    textAlign: "center",
+  },
+  emptyIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    fontFamily: FontNames.sansBold,
+    fontSize: 17,
+    marginBottom: 6,
+  },
+  emptyDesc: {
     fontFamily: FontNames.sansRegular,
-    fontSize: 11.5,
+    fontSize: 13.5,
+    textAlign: "center",
+    lineHeight: 20,
+    maxWidth: 280,
+  },
+  inputContainer: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    gap: 10,
+  },
+  input: {
+    flex: 1,
+    minHeight: 40,
+    maxHeight: 100,
+    borderWidth: 1,
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+    fontFamily: FontNames.sansRegular,
+    fontSize: 14,
+  },
+  sendBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 1,
   },
 });

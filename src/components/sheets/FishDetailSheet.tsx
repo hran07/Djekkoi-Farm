@@ -1,11 +1,15 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { View, Text, StyleSheet, Image, Alert, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
+import Svg, { Path, Circle } from 'react-native-svg';
+import MapView, { Marker } from 'react-native-maps';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
 import { Fish, MarketplaceProduct } from '@/lib/types';
 import { fdate, rp } from '@/lib/format';
-import { getConversationId } from '@/lib/chat';
+import { getConversationId, getOrCreateConversation } from '@/lib/chat';
+import { formatDistance, getCurrentCoords, haversineMeters, openDirectionsInMaps } from '@/lib/location';
+import { useGeofence } from '@/hooks/useGeofence';
 import { Badge, BadgeType } from '../Badge';
 import { KoiArt } from '../KoiArt';
 import { Button } from '../Button';
@@ -74,7 +78,7 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
 }) => {
   const theme = useTheme();
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const { getPondName, openSheet, toggleDisplay, closeSheet, showToast } =
     useStore();
 
@@ -94,7 +98,10 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
   // Selalu sinkronkan state lokal saat initialFish berubah
   useEffect(() => {
     if (initialFish) {
-      setFish(initialFish);
+      const timer = setTimeout(() => {
+        setFish(initialFish);
+      }, 0);
+      return () => clearTimeout(timer);
     }
   }, [initialFish]);
 
@@ -164,6 +171,10 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
               sellerName: d.sellerName,
               sellerEmail: d.sellerEmail,
               kolamName: d.kolamName,
+              storeName: d.storeName,
+              storeLat: typeof d.storeLat === 'number' ? d.storeLat : undefined,
+              storeLng: typeof d.storeLng === 'number' ? d.storeLng : undefined,
+              storeAddress: d.storeAddress,
             } as MarketplaceProduct);
           }
           setFetchState('done');
@@ -252,11 +263,17 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
   );
 
   useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     if (isMarketplaceItem && initialFish?.id) {
-      fetchDetail({ silent: false, isRetry: false });
+      timer = setTimeout(() => {
+        fetchDetail({ silent: false, isRetry: false });
+      }, 0);
     }
 
     return () => {
+      if (timer) {
+        clearTimeout(timer);
+      }
       if (timerRef.current) {
         clearTimeout(timerRef.current);
       }
@@ -268,23 +285,103 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
 
   const isOwner = !fish?.userId || fish?.userId === user?.uid;
   const mktProduct = fish as MarketplaceProduct;
+  const sellerId = mktProduct?.userId || '';
+
+  // ── Lokasi Toko & Geofence (Khusus Pembeli) ────────────────
+  const hasStoreCoords =
+    typeof mktProduct?.storeLat === 'number' && typeof mktProduct?.storeLng === 'number';
+
+  const storeCenter = useMemo(() => {
+    return hasStoreCoords && typeof mktProduct?.storeLat === 'number' && typeof mktProduct?.storeLng === 'number'
+      ? { lat: mktProduct.storeLat, lng: mktProduct.storeLng }
+      : null;
+  }, [mktProduct, hasStoreCoords]);
+
+  const [buyerCoords, setBuyerCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [buyerDistance, setBuyerDistance] = useState<number | null>(null);
+  const [isCalculatingDistance, setIsCalculatingDistance] = useState(false);
+  const [isMonitoringGeofence, setIsMonitoringGeofence] = useState(false);
+  const miniMapError = false;
+
+  const { status: geofenceStatus, distance: geofenceDist } = useGeofence({
+    center: storeCenter,
+    radiusMeters: 100,
+    storeName: mktProduct?.storeName || 'Toko Penjual',
+    enabled: isMonitoringGeofence,
+    onEnter: () => {
+      showToast(`Selamat datang di ${mktProduct.storeName || 'toko penjual'}!`);
+    },
+    onExit: () => {
+      showToast(`Anda telah meninggalkan area ${mktProduct.storeName || 'toko penjual'}`);
+    },
+  });
+
+  const handleCalculateDistance = useCallback(async () => {
+    if (!hasStoreCoords || !storeCenter) return;
+    setIsCalculatingDistance(true);
+    try {
+      const coords = await getCurrentCoords(false); // Balanced accuracy
+      setBuyerCoords({ lat: coords.lat, lng: coords.lng });
+      const dist = haversineMeters(coords, storeCenter);
+      setBuyerDistance(dist);
+      showToast(`Jarak ke toko: ${formatDistance(dist)}`);
+    } catch (err: any) {
+      Alert.alert('Gagal Mengambil Lokasi', err?.message || 'Pastikan GPS dan izin lokasi aktif.');
+    } finally {
+      setIsCalculatingDistance(false);
+    }
+  }, [hasStoreCoords, storeCenter, showToast]);
+
+  const handleOpenDirections = useCallback(() => {
+    if (storeCenter) {
+      openDirectionsInMaps(storeCenter.lat, storeCenter.lng);
+    }
+  }, [storeCenter]);
+
+  const handleToggleGeofence = useCallback(() => {
+    setIsMonitoringGeofence((prev) => {
+      const next = !prev;
+      if (next) {
+        showToast('Pemantauan kedatangan diaktifkan');
+      } else {
+        showToast('Pemantauan kedatangan dinonaktifkan');
+      }
+      return next;
+    });
+  }, [showToast]);
 
   const handleChatSeller = useCallback(() => {
-    if (!user || !mktProduct) return;
-    const sellerId = mktProduct.userId || '';
+    if (!user || !mktProduct || isOwner || !sellerId) return;
     const conversationId = getConversationId(user.uid, sellerId, mktProduct.id);
+    const sName = mktProduct.sellerName || 'Peternak';
+    const myName = profile?.name || user.displayName || 'Pembeli';
+
     closeSheet();
+
+    // Inisialisasi percakapan dengan nama kedua belah pihak
+    getOrCreateConversation({
+      currentUserId: user.uid,
+      currentUserName: myName,
+      sellerId,
+      sellerName: sName,
+      productId: mktProduct.id,
+      productName: mktProduct.varietas,
+    }).catch((err) => {
+      console.warn('[FishDetailSheet] getOrCreateConversation prefetch warning:', err);
+    });
+
     router.push({
       pathname: '/chat/[conversationId]',
       params: {
         conversationId,
         sellerId,
-        sellerName: mktProduct.sellerName || 'Peternak',
+        sellerName: sName,
+        currentUserName: myName,
         productId: mktProduct.id,
         productName: mktProduct.varietas,
       },
     });
-  }, [user, mktProduct, closeSheet, router]);
+  }, [user, profile, mktProduct, isOwner, sellerId, closeSheet, router]);
 
   const getConditionBadgeType = (kondisi: string): BadgeType => {
     if (kondisi === 'Sehat') return 'ok';
@@ -408,6 +505,164 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
         ))}
       </View>
 
+      {/* ── Lokasi Toko Penjual (Khusus Pembeli) ── */}
+      {!isOwner && hasStoreCoords && (
+        <View style={[styles.storeCard, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+          <View style={styles.storeHeader}>
+            <Svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke={theme.accent} strokeWidth={2}>
+              <Path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0118 0z" />
+              <Circle cx={12} cy={10} r={3} />
+            </Svg>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.storeTitle, { color: theme.ink }]}>
+                {mktProduct.storeName || 'Lokasi Toko Penjual'}
+              </Text>
+              <Text style={[styles.storeAddress, { color: theme.muted }]} numberOfLines={2}>
+                {mktProduct.storeAddress || 'Alamat tidak tersedia'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Mini MapView */}
+          <View style={[styles.miniMapWrap, { borderColor: theme.line, backgroundColor: theme.surface2 }]}>
+            {!miniMapError ? (
+              <MapView
+                style={styles.miniMap}
+                initialRegion={{
+                  latitude: storeCenter!.lat,
+                  longitude: storeCenter!.lng,
+                  latitudeDelta: 0.008,
+                  longitudeDelta: 0.008,
+                }}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                pitchEnabled={false}
+                rotateEnabled={false}
+              >
+                <Marker
+                  coordinate={{ latitude: storeCenter!.lat, longitude: storeCenter!.lng }}
+                  title={mktProduct.storeName || 'Toko'}
+                  pinColor="red"
+                />
+                {buyerCoords && (
+                  <Marker
+                    coordinate={{ latitude: buyerCoords.lat, longitude: buyerCoords.lng }}
+                    title="Posisi Anda"
+                    pinColor="blue"
+                  />
+                )}
+              </MapView>
+            ) : (
+              <View style={styles.miniMapFallback}>
+                <Text style={[styles.miniFallbackText, { color: theme.muted }]}>
+                  Peta mini tidak dapat dimuat. Anda dapat membuka rute langsung di Google Maps.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          {/* Status Jarak */}
+          {buyerDistance !== null && (
+            <View style={[styles.distanceRow, { backgroundColor: theme.surface2 }]}>
+              <Text style={[styles.distanceText, { color: theme.ink }]}>
+                Jarak dari Anda:{' '}
+                <Text style={{ fontFamily: FontNames.sansBold, color: theme.accent }}>
+                  {formatDistance(buyerDistance)}
+                </Text>
+              </Text>
+            </View>
+          )}
+
+          {/* Status Geofence */}
+          {isMonitoringGeofence && (
+            <View
+              style={[
+                styles.geofenceStatusWrap,
+                { backgroundColor: geofenceStatus === 'inside' ? '#10b98115' : '#f59e0b15' },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.geofenceStatusText,
+                  { color: geofenceStatus === 'inside' ? '#10b981' : '#f59e0b' },
+                ]}
+              >
+                {geofenceStatus === 'inside'
+                  ? '📍 Anda berada di area toko (≤ 100m)'
+                  : `🚶 Memantau kedatangan (${formatDistance(geofenceDist ?? buyerDistance ?? 0)})`}
+              </Text>
+            </View>
+          )}
+
+          {/* Tombol Hitung Jarak & Petunjuk Arah */}
+          <View style={styles.locationActions}>
+            <Button
+              variant="default"
+              size="sm"
+              style={styles.flexBtn}
+              onPress={handleCalculateDistance}
+              disabled={isCalculatingDistance}
+            >
+              {isCalculatingDistance ? (
+                <ActivityIndicator size="small" color={theme.ink} />
+              ) : (
+                'Hitung Jarak'
+              )}
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              style={styles.flexBtn}
+              onPress={handleOpenDirections}
+            >
+              Petunjuk Arah
+            </Button>
+          </View>
+
+          {/* Toggle Pantau Kedatangan (Geofence) */}
+          <TouchableOpacity
+            style={[
+              styles.geofenceToggle,
+              { borderColor: isMonitoringGeofence ? theme.accent : theme.line },
+            ]}
+            onPress={handleToggleGeofence}
+          >
+            <Svg
+              width={16}
+              height={16}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke={isMonitoringGeofence ? theme.accent : theme.muted}
+              strokeWidth={2}
+            >
+              <Circle cx={12} cy={12} r={10} />
+              <Path d="M12 6v6l4 2" />
+            </Svg>
+            <Text
+              style={[
+                styles.geofenceToggleText,
+                { color: isMonitoringGeofence ? theme.accent : theme.muted },
+              ]}
+            >
+              {isMonitoringGeofence ? 'Matikan Pantau Kedatangan' : 'Pantau Kedatangan (Geofence)'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Info jika Penjual Belum Mengatur Lokasi Toko */}
+      {!isOwner && !hasStoreCoords && (
+        <View style={[styles.noStoreCard, { backgroundColor: theme.surface, borderColor: theme.line }]}>
+          <Svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={theme.muted} strokeWidth={2}>
+            <Circle cx={12} cy={12} r={10} />
+            <Path d="M12 8v4M12 16h.01" />
+          </Svg>
+          <Text style={[styles.noStoreText, { color: theme.muted }]}>
+            Penjual belum mengatur lokasi toko
+          </Text>
+        </View>
+      )}
+
       <View style={styles.buttonGroup}>
         {isOwner ? (
           <>
@@ -458,13 +713,15 @@ export const FishDetailSheet: React.FC<FishDetailSheetProps> = ({
           </>
         ) : (
           <View style={styles.buttonGroup}>
-            <Button
-              variant="pri"
-              wide
-              onPress={handleChatSeller}
-            >
-              Chat Penjual
-            </Button>
+            {!isOwner && Boolean(sellerId) && (
+              <Button
+                variant="pri"
+                wide
+                onPress={handleChatSeller}
+              >
+                Chat Penjual
+              </Button>
+            )}
             <Button variant="default" wide onPress={closeSheet}>
               Tutup
             </Button>
@@ -543,5 +800,101 @@ const styles = StyleSheet.create({
   },
   delBtn: {
     marginTop: 2,
+  },
+  storeCard: {
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 14,
+    gap: 10,
+  },
+  storeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  storeTitle: {
+    fontFamily: FontNames.sansBold,
+    fontSize: 14,
+  },
+  storeAddress: {
+    fontFamily: FontNames.sansRegular,
+    fontSize: 12,
+    marginTop: 2,
+  },
+  miniMapWrap: {
+    height: 150,
+    borderRadius: 10,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  miniMap: {
+    width: '100%',
+    height: '100%',
+  },
+  miniMapFallback: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 12,
+  },
+  miniFallbackText: {
+    fontFamily: FontNames.sansRegular,
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  distanceRow: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  distanceText: {
+    fontFamily: FontNames.sansMedium,
+    fontSize: 13,
+  },
+  geofenceStatusWrap: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  geofenceStatusText: {
+    fontFamily: FontNames.sansSemiBold,
+    fontSize: 12,
+  },
+  locationActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  flexBtn: {
+    flex: 1,
+  },
+  geofenceToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 10,
+    gap: 6,
+  },
+  geofenceToggleText: {
+    fontFamily: FontNames.sansSemiBold,
+    fontSize: 12,
+  },
+  noStoreCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    gap: 8,
+    marginBottom: 14,
+  },
+  noStoreText: {
+    fontFamily: FontNames.sansRegular,
+    fontSize: 12,
   },
 });

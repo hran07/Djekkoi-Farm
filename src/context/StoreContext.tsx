@@ -1,23 +1,36 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { doc, onSnapshot, setDoc, deleteDoc, collection, getDocFromServer } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
-import { AppState, Fish, HistoryEntry, Pond, SaleInfo, MarketplaceProduct } from '@/lib/types';
-import { fLabel, uid } from '@/lib/format';
-import { useAuth } from '@/context/AuthContext';
+import { useAuth } from "@/context/AuthContext";
+import { db } from "@/lib/firebase";
+import { fLabel, uid } from "@/lib/format";
+import { AppState, Fish, HistoryEntry, Pond, SaleInfo } from "@/lib/types";
+import {
+  deleteDoc,
+  doc,
+  getDocFromServer,
+  onSnapshot,
+  setDoc,
+} from "firebase/firestore";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
 export type SheetType =
-  | 'addFish'
-  | 'fishDetail'
-  | 'editFish'
-  | 'sellFish'
-  | 'moveFish'
-  | 'deleteFish'
-  | 'addPond'
-  | 'editPond'
-  | 'deletePond'
-  | 'settings'
-  | 'confirm'
-  | 'proofImage';
+  | "addFish"
+  | "fishDetail"
+  | "editFish"
+  | "sellFish"
+  | "moveFish"
+  | "deleteFish"
+  | "addPond"
+  | "editPond"
+  | "deletePond"
+  | "settings"
+  | "confirm"
+  | "proofImage";
 
 export interface SheetState {
   type: SheetType;
@@ -57,8 +70,12 @@ interface StoreContextType {
   refresh: () => Promise<void>;
 
   // Data Actions
-  addFish: (fishData: Omit<Fish, 'id' | 'tgl'>) => void;
-  editFish: (id: string, updates: Partial<Fish>, logEntries: { judul: string; detail: string }[]) => void;
+  addFish: (fishData: Omit<Fish, "id" | "tgl">) => void;
+  editFish: (
+    id: string,
+    updates: Partial<Fish>,
+    logEntries: { judul: string; detail: string }[],
+  ) => void;
   sellFish: (id: string, count: number, saleInfo: SaleInfo) => void;
   moveFish: (id: string, targetPondId: string, count: number) => void;
   deleteFish: (id: string) => void;
@@ -73,7 +90,6 @@ interface StoreContextType {
   getPondName: (id: string) => string;
 }
 
-
 const StoreContext = createContext<StoreContextType | null>(null);
 
 const initialAppState: AppState = {
@@ -83,16 +99,24 @@ const initialAppState: AppState = {
   varietyHistory: [],
 };
 
-export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user } = useAuth();
+export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const { user, profile } = useAuth();
+  const profileRef = useRef(profile);
+  useEffect(() => {
+    profileRef.current = profile;
+  }, [profile]);
   const [state, setState] = useState<AppState>(initialAppState);
   const [isLoaded, setIsLoaded] = useState(false);
 
   // UI filters
-  const [searchQuery, setSearchQuery] = useState('');
-  const [pondFilter, setPondFilter] = useState('all');
-  const [activePondDetailId, setActivePondDetailId] = useState<string | null>(null);
-  const [historyFilter, setHistoryFilter] = useState('all');
+  const [searchQuery, setSearchQuery] = useState("");
+  const [pondFilter, setPondFilter] = useState("all");
+  const [activePondDetailId, setActivePondDetailId] = useState<string | null>(
+    null,
+  );
+  const [historyFilter, setHistoryFilter] = useState("all");
   const [periodFilter, setPeriodFilter] = useState(30);
 
   // Toast
@@ -108,10 +132,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const clearStore = useCallback(() => {
     setState(initialAppState);
     setIsLoaded(false);
-    setSearchQuery('');
-    setPondFilter('all');
+    setSearchQuery("");
+    setPondFilter("all");
     setActivePondDetailId(null);
-    setHistoryFilter('all');
+    setHistoryFilter("all");
     setPeriodFilter(30);
     setActiveSheet(null);
     setToastMessage(null);
@@ -129,20 +153,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Listen to Cloud Firestore in real-time, strictly isolated per user UID
   useEffect(() => {
     if (!user) {
-      clearStore();
-      setIsLoaded(true);
-      return;
+      const timer = setTimeout(() => {
+        clearStore();
+        setIsLoaded(true);
+      }, 0);
+      return () => clearTimeout(timer);
     }
 
-    setIsLoaded(false);
-    setSearchQuery('');
-    setPondFilter('all');
-    setActivePondDetailId(null);
-    setHistoryFilter('all');
-    setPeriodFilter(30);
-    setActiveSheet(null);
+    const resetTimer = setTimeout(() => {
+      setIsLoaded(false);
+      setSearchQuery("");
+      setPondFilter("all");
+      setActivePondDetailId(null);
+      setHistoryFilter("all");
+      setPeriodFilter(30);
+      setActiveSheet(null);
+    }, 0);
 
-    const docRef = doc(db, 'user_stores', user.uid);
+    const docRef = doc(db, "user_stores", user.uid);
     const unsubscribe = onSnapshot(
       docRef,
       (docSnap) => {
@@ -171,22 +199,36 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               ponds: userPonds,
               fish: userFish,
               history: userHistory,
-              varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
+              varietyHistory: Array.isArray(data.varietyHistory)
+                ? data.varietyHistory
+                : [],
             });
 
             // Sinkronkan otomatis ikan berstatus display=true milik user ini ke koleksi marketplace_products publik
             userFish.forEach((f) => {
-              const pondName = userPonds.find((p) => p.id === f.kolamId)?.name || '-';
-              const sellerName = user.displayName || user.email?.split('@')[0] || 'Peternak Djekkoi';
-              const mktRef = doc(db, 'marketplace_products', f.id);
+              const pondName =
+                userPonds.find((p) => p.id === f.kolamId)?.name || "-";
+              const sellerName =
+                user.displayName ||
+                user.email?.split("@")[0] ||
+                "Peternak Djekkoi";
+              const mktRef = doc(db, "marketplace_products", f.id);
               if (f.display) {
+                const storeFields = profileRef.current?.store
+                  ? {
+                      storeName: profileRef.current.store.name,
+                      storeLat: profileRef.current.store.lat,
+                      storeLng: profileRef.current.store.lng,
+                      storeAddress: profileRef.current.store.address,
+                    }
+                  : {};
                 setDoc(
                   mktRef,
                   {
                     id: f.id,
                     userId: user.uid,
                     sellerName,
-                    sellerEmail: user.email || '',
+                    sellerEmail: user.email || "",
                     varietas: f.varietas,
                     asal: f.asal,
                     jumlah: f.jumlah,
@@ -203,8 +245,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                     foto: f.foto,
                     tgl: f.tgl,
                     updatedAt: new Date().toISOString(),
+                    ...storeFields,
                   },
-                  { merge: true }
+                  { merge: true },
                 ).catch(() => {});
               } else {
                 deleteDoc(mktRef).catch(() => {});
@@ -217,12 +260,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             userId: user.uid,
             updatedAt: new Date().toISOString(),
             ponds: [
-              { id: `pond-1-${user.uid.slice(0, 6)}`, userId: user.uid, name: 'Kolam Utama', lokasi: 'Area Depan' },
-              { id: `pond-2-${user.uid.slice(0, 6)}`, userId: user.uid, name: 'Kolam Karantina', lokasi: 'Area Karantina' },
+              {
+                id: `pond-1-${user.uid.slice(0, 6)}`,
+                userId: user.uid,
+                name: "Kolam Utama",
+                lokasi: "Area Depan",
+              },
+              {
+                id: `pond-2-${user.uid.slice(0, 6)}`,
+                userId: user.uid,
+                name: "Kolam Karantina",
+                lokasi: "Area Karantina",
+              },
             ],
             fish: [],
             history: [],
-            varietyHistory: ['Kohaku', 'Taisho Sanke', 'Showa Sanshoku', 'Asagi', 'Shiro Utsuri'],
+            varietyHistory: [
+              "Kohaku",
+              "Taisho Sanke",
+              "Showa Sanshoku",
+              "Asagi",
+              "Shiro Utsuri",
+            ],
           };
           setDoc(docRef, defaultInitialState).catch(console.error);
           setState(defaultInitialState);
@@ -230,31 +289,40 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         setIsLoaded(true);
       },
       (error) => {
-        console.error('Failed to listen to Firestore user store changes:', error);
+        console.error(
+          "Failed to listen to Firestore user store changes:",
+          error,
+        );
         setIsLoaded(true);
-      }
+      },
     );
 
-    return () => unsubscribe();
+    return () => {
+      clearTimeout(resetTimer);
+      unsubscribe();
+    };
   }, [user, clearStore]);
 
   // Save to Cloud Firestore, bound strictly to user UID
-  const saveState = useCallback(async (newState: AppState) => {
-    if (!user) return;
-    const stateWithUser: AppState = {
-      ...newState,
-      userId: user.uid,
-      updatedAt: new Date().toISOString(),
-    };
-    setState(stateWithUser);
-    try {
-      const docRef = doc(db, 'user_stores', user.uid);
-      await setDoc(docRef, stateWithUser);
-    } catch (e) {
-      console.error('Failed to save data to Firestore:', e);
-      showToast('Gagal menyimpan data ke Firestore.');
-    }
-  }, [user, showToast]);
+  const saveState = useCallback(
+    async (newState: AppState) => {
+      if (!user) return;
+      const stateWithUser: AppState = {
+        ...newState,
+        userId: user.uid,
+        updatedAt: new Date().toISOString(),
+      };
+      setState(stateWithUser);
+      try {
+        const docRef = doc(db, "user_stores", user.uid);
+        await setDoc(docRef, stateWithUser);
+      } catch (e) {
+        console.error("Failed to save data to Firestore:", e);
+        showToast("Gagal menyimpan data ke Firestore.");
+      }
+    },
+    [user, showToast],
+  );
 
   const openSheet = useCallback((type: SheetType, data?: any) => {
     setActiveSheet({ type, data });
@@ -267,7 +335,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const refresh = useCallback(async () => {
     if (!user) return;
     try {
-      const docRef = doc(db, 'user_stores', user.uid);
+      const docRef = doc(db, "user_stores", user.uid);
       const docSnap = await getDocFromServer(docRef);
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -293,7 +361,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             ponds: userPonds,
             fish: userFish,
             history: userHistory,
-            varietyHistory: Array.isArray(data.varietyHistory) ? data.varietyHistory : [],
+            varietyHistory: Array.isArray(data.varietyHistory)
+              ? data.varietyHistory
+              : [],
           });
         }
       }
@@ -305,9 +375,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const getPondName = useCallback(
     (id: string): string => {
       const p = state.ponds.find((x) => x.id === id);
-      return p ? p.name : '-';
+      return p ? p.name : "-";
     },
-    [state.ponds]
+    [state.ponds],
   );
 
   // Helper untuk sinkronisasi produk ke koleksi publik marketplace_products
@@ -315,17 +385,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     async (fish: Fish, isDisplay: boolean) => {
       if (!user) return;
       try {
-        const mktDocRef = doc(db, 'marketplace_products', fish.id);
+        const mktDocRef = doc(db, "marketplace_products", fish.id);
         if (isDisplay) {
-          const pondName = state.ponds.find((p) => p.id === fish.kolamId)?.name || '-';
-          const sellerName = user.displayName || user.email?.split('@')[0] || 'Peternak Djekkoi';
+          const pondName =
+            state.ponds.find((p) => p.id === fish.kolamId)?.name || "-";
+          const sellerName =
+            user.displayName || user.email?.split("@")[0] || "Peternak Djekkoi";
+          const storeFields = profile?.store
+            ? {
+                storeName: profile.store.name,
+                storeLat: profile.store.lat,
+                storeLng: profile.store.lng,
+                storeAddress: profile.store.address,
+              }
+            : {};
           await setDoc(
             mktDocRef,
             {
               id: fish.id,
               userId: user.uid,
               sellerName,
-              sellerEmail: user.email || '',
+              sellerEmail: user.email || "",
               varietas: fish.varietas,
               asal: fish.asal,
               jumlah: fish.jumlah,
@@ -342,22 +422,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               foto: fish.foto,
               tgl: fish.tgl,
               updatedAt: new Date().toISOString(),
+              ...storeFields,
             },
-            { merge: true }
+            { merge: true },
           );
         } else {
           await deleteDoc(mktDocRef);
         }
       } catch (err) {
-        console.warn('Sync to marketplace error:', err);
+        console.warn("Sync to marketplace error:", err);
       }
     },
-    [user, state.ponds]
+    [user, profile, state.ponds],
   );
 
   // Data Actions (Semua menyertakan userId pengguna yang login)
   const addFish = useCallback(
-    (fishData: Omit<Fish, 'id' | 'tgl'>) => {
+    (fishData: Omit<Fish, "id" | "tgl">) => {
       if (!user) return;
       const newFish: Fish = {
         ...fishData,
@@ -365,13 +446,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         userId: user.uid,
         tgl: new Date().toISOString(),
       };
-      const pondName = state.ponds.find((p) => p.id === newFish.kolamId)?.name || '-';
+      const pondName =
+        state.ponds.find((p) => p.id === newFish.kolamId)?.name || "-";
       const historyItem: HistoryEntry = {
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'masuk',
-        judul: 'Ikan masuk',
+        tipe: "masuk",
+        judul: "Ikan masuk",
         ikan: fLabel(newFish),
         jumlah: newFish.jumlah,
         ke: pondName,
@@ -382,7 +464,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (
         trimmedVarietas &&
         !newVarietyHistory.some(
-          (v) => v.toLowerCase() === trimmedVarietas.toLowerCase()
+          (v) => v.toLowerCase() === trimmedVarietas.toLowerCase(),
         )
       ) {
         newVarietyHistory = [...newVarietyHistory, trimmedVarietas];
@@ -404,23 +486,29 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
 
       closeSheet();
-      showToast('Ikan ditambahkan');
+      showToast("Ikan ditambahkan");
     },
-    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast],
   );
 
   const editFish = useCallback(
-    (id: string, updates: Partial<Fish>, logEntries: { judul: string; detail: string }[]) => {
+    (
+      id: string,
+      updates: Partial<Fish>,
+      logEntries: { judul: string; detail: string }[],
+    ) => {
       if (!user) return;
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
-      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, ...updates, userId: user.uid } : f));
+      const updatedFishList = state.fish.map((f) =>
+        f.id === id ? { ...f, ...updates, userId: user.uid } : f,
+      );
       const newLogs: HistoryEntry[] = logEntries.map((log) => ({
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'edit_ikan',
+        tipe: "edit_ikan",
         judul: log.judul,
         ikan: fishItem.varietas,
         detail: log.detail,
@@ -437,13 +525,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       // Sinkronkan pembaruan ikan ke marketplace_products
       const updatedFish = { ...fishItem, ...updates, userId: user.uid };
-      const willDisplay = updates.display !== undefined ? updates.display : fishItem.display;
+      const willDisplay =
+        updates.display !== undefined ? updates.display : fishItem.display;
       syncToMarketplace(updatedFish, willDisplay);
 
       closeSheet();
-      showToast('Perubahan disimpan');
+      showToast("Perubahan disimpan");
     },
-    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast],
   );
 
   const sellFish = useCallback(
@@ -452,17 +541,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
-      const pondName = state.ponds.find((p) => p.id === fishItem.kolamId)?.name || '-';
+      const pondName =
+        state.ponds.find((p) => p.id === fishItem.kolamId)?.name || "-";
 
       let updatedFishList: Fish[];
       if (fishItem.jumlah - count <= 0) {
         updatedFishList = state.fish.filter((f) => f.id !== id);
         // Hapus dari marketplace karena stok habis
-        deleteDoc(doc(db, 'marketplace_products', id)).catch(() => {});
+        deleteDoc(doc(db, "marketplace_products", id)).catch(() => {});
       } else {
         const remainingCount = fishItem.jumlah - count;
         updatedFishList = state.fish.map((f) =>
-          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f
+          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f,
         );
         // Perbarui jumlah stok di marketplace jika aktif
         if (fishItem.display) {
@@ -474,9 +564,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'keluar',
-        judul: 'Ikan keluar',
-        tujuan: 'terjual',
+        tipe: "keluar",
+        judul: "Ikan keluar",
+        tujuan: "terjual",
         ikan: fLabel(fishItem),
         jumlah: count,
         dari: pondName,
@@ -492,9 +582,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       saveState(newState);
       closeSheet();
-      showToast('Penjualan dicatat');
+      showToast("Penjualan dicatat");
     },
-    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast],
   );
 
   const moveFish = useCallback(
@@ -503,12 +593,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
-      const sourcePondName = state.ponds.find((p) => p.id === fishItem.kolamId)?.name || '-';
-      const targetPondName = state.ponds.find((p) => p.id === targetPondId)?.name || '-';
+      const sourcePondName =
+        state.ponds.find((p) => p.id === fishItem.kolamId)?.name || "-";
+      const targetPondName =
+        state.ponds.find((p) => p.id === targetPondId)?.name || "-";
 
       let updatedFishList: Fish[];
       if (count === fishItem.jumlah) {
-        updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, kolamId: targetPondId, userId: user.uid } : f));
+        updatedFishList = state.fish.map((f) =>
+          f.id === id ? { ...f, kolamId: targetPondId, userId: user.uid } : f,
+        );
       } else {
         const remainingCount = fishItem.jumlah - count;
         const clonedFish: Fish = {
@@ -519,7 +613,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           kolamId: targetPondId,
         };
         updatedFishList = state.fish.map((f) =>
-          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f
+          f.id === id ? { ...f, jumlah: remainingCount, userId: user.uid } : f,
         );
         updatedFishList.push(clonedFish);
       }
@@ -528,9 +622,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'keluar',
-        judul: 'Ikan keluar',
-        tujuan: 'pindah',
+        tipe: "keluar",
+        judul: "Ikan keluar",
+        tujuan: "pindah",
         ikan: fLabel(fishItem),
         jumlah: count,
         dari: sourcePondName,
@@ -546,9 +640,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       saveState(newState);
       closeSheet();
-      showToast('Ikan dipindahkan');
+      showToast("Ikan dipindahkan");
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast],
   );
 
   const deleteFish = useCallback(
@@ -557,15 +651,16 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const fishItem = state.fish.find((f) => f.id === id);
       if (!fishItem) return;
 
-      const pondName = state.ponds.find((p) => p.id === fishItem.kolamId)?.name || '-';
+      const pondName =
+        state.ponds.find((p) => p.id === fishItem.kolamId)?.name || "-";
       const updatedFishList = state.fish.filter((f) => f.id !== id);
 
       const historyItem: HistoryEntry = {
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'edit_ikan',
-        judul: 'Hapus data ikan',
+        tipe: "edit_ikan",
+        judul: "Hapus data ikan",
         ikan: fLabel(fishItem),
         jumlah: fishItem.jumlah,
         detail: `Data dihapus dari ${pondName}`,
@@ -581,12 +676,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       saveState(newState);
 
       // Hapus juga dari marketplace publik jika ada
-      deleteDoc(doc(db, 'marketplace_products', id)).catch(() => {});
+      deleteDoc(doc(db, "marketplace_products", id)).catch(() => {});
 
       closeSheet();
-      showToast('Data ikan dihapus');
+      showToast("Data ikan dihapus");
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast],
   );
 
   const toggleDisplay = useCallback(
@@ -596,7 +691,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!fishItem) return;
 
       const newDisplay = !fishItem.display;
-      const updatedFishList = state.fish.map((f) => (f.id === id ? { ...f, display: newDisplay, userId: user.uid } : f));
+      const updatedFishList = state.fish.map((f) =>
+        f.id === id ? { ...f, display: newDisplay, userId: user.uid } : f,
+      );
 
       const newState: AppState = {
         ...state,
@@ -610,9 +707,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       syncToMarketplace({ ...fishItem, display: newDisplay }, newDisplay);
 
       closeSheet();
-      showToast(newDisplay ? 'Produk terhubung ke Marketplace' : 'Produk ditarik dari Marketplace');
+      showToast(
+        newDisplay
+          ? "Produk terhubung ke Marketplace"
+          : "Produk ditarik dari Marketplace",
+      );
     },
-    [state, user, saveState, syncToMarketplace, closeSheet, showToast]
+    [state, user, saveState, syncToMarketplace, closeSheet, showToast],
   );
 
   const addPond = useCallback(
@@ -629,10 +730,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'edit_kolam',
-        judul: 'Tambah kolam',
-        ikan: '',
-        detail: `${name} ditambahkan${lokasi ? ' di ' + lokasi : ''}`,
+        tipe: "edit_kolam",
+        judul: "Tambah kolam",
+        ikan: "",
+        detail: `${name} ditambahkan${lokasi ? " di " + lokasi : ""}`,
       };
 
       const newState: AppState = {
@@ -644,9 +745,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       saveState(newState);
       closeSheet();
-      showToast('Kolam ditambahkan');
+      showToast("Kolam ditambahkan");
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast],
   );
 
   const editPond = useCallback(
@@ -655,7 +756,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       const pondItem = state.ponds.find((p) => p.id === id);
       if (!pondItem) return;
 
-      const updatedPonds = state.ponds.map((p) => (p.id === id ? { ...p, name, lokasi, userId: user.uid } : p));
+      const updatedPonds = state.ponds.map((p) =>
+        p.id === id ? { ...p, name, lokasi, userId: user.uid } : p,
+      );
       const logs: HistoryEntry[] = [];
 
       if (name !== pondItem.name) {
@@ -663,9 +766,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           id: uid(),
           userId: user.uid,
           ts: new Date().toISOString(),
-          tipe: 'edit_kolam',
-          judul: 'Ubah nama kolam',
-          ikan: '',
+          tipe: "edit_kolam",
+          judul: "Ubah nama kolam",
+          ikan: "",
           detail: `${pondItem.name} menjadi ${name}`,
         });
       }
@@ -675,10 +778,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           id: uid(),
           userId: user.uid,
           ts: new Date().toISOString(),
-          tipe: 'edit_kolam',
-          judul: 'Ubah lokasi kolam',
-          ikan: '',
-          detail: `${name} pindah ke ${lokasi || '(kosong)'}`,
+          tipe: "edit_kolam",
+          judul: "Ubah lokasi kolam",
+          ikan: "",
+          detail: `${name} pindah ke ${lokasi || "(kosong)"}`,
         });
       }
 
@@ -691,9 +794,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       saveState(newState);
       closeSheet();
-      showToast('Kolam diperbarui');
+      showToast("Kolam diperbarui");
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast],
   );
 
   const deletePond = useCallback(
@@ -707,13 +810,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         id: uid(),
         userId: user.uid,
         ts: new Date().toISOString(),
-        tipe: 'edit_kolam',
-        judul: 'Hapus kolam',
-        ikan: '',
+        tipe: "edit_kolam",
+        judul: "Hapus kolam",
+        ikan: "",
         detail: `${pondItem.name} dihapus`,
       };
 
-      if (pondFilter === id) setPondFilter('all');
+      if (pondFilter === id) setPondFilter("all");
       if (activePondDetailId === id) setActivePondDetailId(null);
 
       const newState: AppState = {
@@ -725,9 +828,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       saveState(newState);
       closeSheet();
-      showToast('Kolam dihapus');
+      showToast("Kolam dihapus");
     },
-    [state, user, pondFilter, activePondDetailId, saveState, closeSheet, showToast]
+    [
+      state,
+      user,
+      pondFilter,
+      activePondDetailId,
+      saveState,
+      closeSheet,
+      showToast,
+    ],
   );
 
   const deleteVarietyHistory = useCallback(
@@ -735,7 +846,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!user) return;
       const trimmed = name.trim().toLowerCase();
       const updatedHistory = (state.varietyHistory || []).filter(
-        (v) => v.trim().toLowerCase() !== trimmed
+        (v) => v.trim().toLowerCase() !== trimmed,
       );
       const newState: AppState = {
         ...state,
@@ -744,9 +855,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       };
       saveState(newState);
       closeSheet();
-      showToast('Rekomendasi dihapus');
+      showToast("Rekomendasi dihapus");
     },
-    [state, user, saveState, closeSheet, showToast]
+    [state, user, saveState, closeSheet, showToast],
   );
 
   const wipeData = useCallback(() => {
@@ -759,17 +870,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       history: [],
       varietyHistory: [],
     };
-    setPondFilter('all');
+    setPondFilter("all");
     setActivePondDetailId(null);
 
     // Hapus semua ikan dari marketplace publik
     state.fish.forEach((f) => {
-      deleteDoc(doc(db, 'marketplace_products', f.id)).catch(() => {});
+      deleteDoc(doc(db, "marketplace_products", f.id)).catch(() => {});
     });
 
     saveState(emptyState);
     closeSheet();
-    showToast('Semua data dihapus');
+    showToast("Semua data dihapus");
   }, [user, state.fish, saveState, closeSheet, showToast]);
 
   return (
@@ -811,13 +922,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       {children}
     </StoreContext.Provider>
   );
-
 };
 
 export const useStore = (): StoreContextType => {
   const context = useContext(StoreContext);
   if (!context) {
-    throw new Error('useStore must be used within a StoreProvider');
+    throw new Error("useStore must be used within a StoreProvider");
   }
   return context;
 };

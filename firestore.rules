@@ -43,7 +43,40 @@ service cloud.firestore {
       allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
     }
 
-    // 4. Blokir semua akses lain secara default
+    // 4. Chat Antar Pengguna (Collection: conversations)
+    // Percakapan hanya bisa dibuat dari produk marketplace yang valid
+    match /conversations/{cid} {
+      allow get: if request.auth != null
+        && (resource == null || request.auth.uid in resource.data.participants);
+      allow list: if request.auth != null
+        && request.auth.uid in resource.data.participants;
+      allow create: if request.auth != null
+        && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && request.auth.uid in request.resource.data.participants
+        && exists(/databases/$(database)/documents/marketplace_products/$(request.resource.data.productId))
+        && get(/databases/$(database)/documents/marketplace_products/$(request.resource.data.productId)).data.userId in request.resource.data.participants;
+      allow update: if request.auth != null
+        && request.auth.uid in resource.data.participants
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['lastMessage','lastMessageAt','lastSenderId']);
+      allow delete: if false;
+
+      match /messages/{mid} {
+        allow read: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants;
+        allow create: if request.auth != null
+          && request.auth.uid in get(/databases/$(database)/documents/conversations/$(cid)).data.participants
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() > 0
+          && request.resource.data.text.size() <= 1000
+          && request.resource.data.createdAt == request.time;
+        allow update, delete: if false;
+      }
+    }
+
+    // 5. Blokir semua akses lain secara default
     match /{document=**} {
       allow read, write: if false;
     }

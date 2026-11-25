@@ -1,17 +1,17 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Svg, { Circle, Path, Line } from 'react-native-svg';
+import Svg, { Path } from 'react-native-svg';
 import { useTheme } from '@/hooks/useTheme';
 import { FontNames } from '@/constants/theme';
 import { Logo } from './Logo';
 import { ftodayWithDay } from '@/lib/format';
-import { useStore } from '@/context/StoreContext';
 
 export const AppHeader: React.FC = () => {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const { openSheet } = useStore();
+  const router = useRouter();
 
   const todayStr = ftodayWithDay();
 
@@ -41,7 +41,7 @@ export const AppHeader: React.FC = () => {
           </View>
         </View>
 
-        {/* Settings button */}
+        {/* Chat button */}
         <TouchableOpacity
           style={[
             styles.iconBtn,
@@ -50,19 +50,22 @@ export const AppHeader: React.FC = () => {
               borderColor: theme.line,
             },
           ]}
-          onPress={() => openSheet('settings')}
+          onPress={() => router.push('/chat' as any)}
           accessibilityRole="button"
-          accessibilityLabel="Pengaturan"
+          accessibilityLabel="Chat"
           activeOpacity={0.7}
         >
-          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={theme.ink} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-            {/* Settings/sliders icon */}
-            <Line x1={4} y1={6} x2={20} y2={6} />
-            <Line x1={4} y1={12} x2={20} y2={12} />
-            <Line x1={4} y1={18} x2={20} y2={18} />
-            <Circle cx={9} cy={6} r={2.2} fill={theme.bg} stroke={theme.ink} strokeWidth={1.8} />
-            <Circle cx={16} cy={12} r={2.2} fill={theme.bg} stroke={theme.ink} strokeWidth={1.8} />
-            <Circle cx={11} cy={18} r={2.2} fill={theme.bg} stroke={theme.ink} strokeWidth={1.8} />
+          <Svg
+            width={19}
+            height={19}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke={theme.ink}
+            strokeWidth={1.8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <Path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </Svg>
         </TouchableOpacity>
       </View>

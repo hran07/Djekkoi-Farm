@@ -37,7 +37,13 @@
       "expo-image",
       "expo-status-bar",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Djekkoi Farm menggunakan lokasi untuk menandai posisi toko kolam Anda dan menampilkan petunjuk arah ke toko penjual."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

@@ -4,6 +4,13 @@
     "strict": true,
     "jsx": "react-jsx",
     "ignoreDeprecations": "6.0",
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "moduleResolution": "bundler",
+    "customConditions": [
+      "react-native"
+    ],
+    "skipLibCheck": true,
     "baseUrl": ".",
     "paths": {
       "@/*": [
